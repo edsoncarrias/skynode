@@ -634,38 +634,29 @@ def logout():
 
 @app.route('/download-agent')
 def download_agent():
-    # 1. Detecta o IP ou domínio que o usuário usou para acessar o painel
-    # Isso garante que o agente use o mesmo endereço do servidor
-    server_host = request.host.split(':')[0]
-    
-    # 2. Define as portas padrão que o seu agente usa
-    config_content = f"""[SERVER_CONFIG]
-server_ip = {server_host}
-port = 6001
-screenshot_port = 6002
-command_port = 6003
-"""
-    
-    # 3. Caminho Dinâmico: Procura a pasta 'downloads' na raiz do projeto
-    # Isso evita caminhos fixos como '/app/' que quebram entre Windows e Linux
+    # 1. Descobre o caminho da pasta 'downloads' na raiz do projeto
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    agent_exe_path = os.path.join(base_dir, 'downloads', 'agent.exe')
+    downloads_path = os.path.join(base_dir, 'downloads')
     
-    # Cria o arquivo ZIP diretamente na memória do servidor para envio rápido
+    # Caminho completo dos dois arquivos
+    agent_path = os.path.join(downloads_path, 'agent.exe')
+    config_path = os.path.join(downloads_path, 'config.ini')
+    
+    # 2. Verifica se a pasta ou os arquivos estão faltando no servidor
+    if not os.path.exists(agent_path) or not os.path.exists(config_path):
+        # Se falhar, ele mostra o que o servidor realmente tem na pasta para sabermos o motivo
+        arquivos_reais = os.listdir(downloads_path) if os.path.exists(downloads_path) else "Pasta nao existe"
+        return f"Erro: Arquivos nao encontrados. Conteudo da pasta: {arquivos_reais}", 500
+
+    # 3. Cria o ZIP na memória incluindo os dois arquivos existentes
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        # Coloca o config.ini personalizado com o IP correto dentro do ZIP
-        zipf.writestr('config.ini', config_content)
-        
-        # Coloca o executável do agente dentro do ZIP
-        try:
-            zipf.write(agent_exe_path, 'agent.exe')
-        except FileNotFoundError:
-            return "Erro: O arquivo agent.exe base não foi encontrado no servidor.", 500
+        zipf.write(agent_path, 'agent.exe')
+        zipf.write(config_path, 'config.ini')
             
     memory_file.seek(0)
     
-    # 4. Envia o arquivo ZIP pronto para o navegador do cliente
+    # 4. Envia o ZIP pronto para o usuário
     return send_file(
         memory_file,
         mimetype='application/zip',
