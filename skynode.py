@@ -192,51 +192,42 @@ def check_alerts(device):
         add_alert(hostname, "⚫ Dispositivo Offline")
 
 # =========================================
-# BANCO DE DADOS (CENTRALIZADO)
-# =========================================
-# =========================================
-# BANCO DE DADOS (CENTRALIZADO NA NUVEM)
+# BANCO DE DADOS (CENTRALIZADO - SQLITE CORRIGIDO)
 # =========================================
 def connect_db():
-    # Conecta no MySQL gratuito da nuvem Clever Cloud
-    return pymysql.connect(
-        host='COLOQUE_AQUI_O_TEXTO_DO_HOSPEDAR',
-        port=COLOQUE_AQUI_A_PORTA_GERALMENTE_3306,
-        user='COLOQUE_AQUI_O_TEXTO_DO_USUARIO',
-        password='COLOQUE_AQUI_A_TUA_SENHA',
-        database='COLOQUE_AQUI_O_NOME_DO_DATABASE',
-        autocommit=True
-    )
+    # Cria e conecta ao arquivo de banco de dados local na Render
+    conn = sqlite3.connect('skynode.db', check_same_thread=False)
+    return conn
 
 def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
-    # 1. Cria a tabela de usuários usando VARCHAR em vez de TEXT (Obrigatório para UNIQUE no MariaDB)
+    # 1. Cria a tabela de usuários adaptada para SQLite (AUTOINCREMENT)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(100) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL,
-        email VARCHAR(255)
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        email TEXT
     )
     """)
     
-    # 2. Tentativa de adicionar a coluna email (mantendo a segurança caso a tabela já exista)
+    # 2. Tentativa de adicionar a coluna email caso a tabela já exista
     try:
-        cursor.execute("ALTER TABLE users ADD COLUMN email VARCHAR(255);")
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
         conn.commit()
         print("🎉 Coluna 'email' adicionada com sucesso à tabela existente!")
     except Exception:
-        # Se a coluna já existir, o MariaDB joga um erro que podemos ignorar com segurança
+        # No SQLite, se a coluna já existir, ele gera um erro que podemos ignorar
         pass
 
-    # 3. Cria a tabela de métricas adaptada para MariaDB
+    # 3. Cria a tabela de métricas adaptada para SQLite
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        hostname VARCHAR(255),
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hostname TEXT,
         cpu REAL,
         ram REAL,
         disk REAL,
@@ -245,26 +236,49 @@ def create_database():
     )
     """)
 
-    # 4. Cria a tabela de dispositivos adaptada para MariaDB
+    # 4. Cria a tabela de dispositivos adaptada para SQLite
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS dispositivos (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        hostname VARCHAR(255) UNIQUE NOT NULL,
-        ip VARCHAR(45) NOT NULL,
-        status VARCHAR(20) DEFAULT 'offline'
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hostname TEXT UNIQUE NOT NULL,
+        ip TEXT NOT NULL,
+        status TEXT DEFAULT 'offline'
     )
     """)
     
-    # 5. Criação do Admin padrão com verificação compatível com PyMySQL
-    cursor.execute("SELECT * FROM users WHERE username=%s", ("admin",))
+    # 5. Criação do Admin padrão adaptada para a sintaxe do SQLite (?)
+    cursor.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not cursor.fetchone():
         admin_password = generate_password_hash("admin123")
-        cursor.execute("INSERT INTO users (username, password, role, email) VALUES (%s, %s, %s, %s)", 
+        cursor.execute("INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)", 
                        ("admin", admin_password, "admin", "admin@skynode.com"))
     
     conn.commit()
     conn.close()
-    print("✅ Banco de dados MariaDB atualizado com sucesso!")
+    print("✅ Banco de dados SQLite inicializado com sucesso!")
+
+def save_metrics(device):
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        # No SQLite usamos '?' em vez de '%s'
+        cursor.execute("""
+        INSERT INTO metrics (hostname, cpu, ram, disk, ping)
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            device.get("hostname"),
+            device.get("cpu", 0),
+            device.get("ram", 0),
+            device.get("disk", 0),
+            device.get("ping", 0)
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("❌ Erro save metrics:", e)
+
+# Executa inicialização única
+create_database()
 
 def save_metrics(device):
     try:
