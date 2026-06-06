@@ -86,7 +86,6 @@ def ai_analyze_alert(message):
 # TELEGRAM CONFIG
 # AGORA O CÓDIGO BUSCA DO SISTEMA, SEM EXPOR NADA NO GITHUB!
 # =========================================
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -263,7 +262,7 @@ def save_metrics(device):
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        # No SQLite usamos '?' em vez de '%s'
+        # No SQLite usamos '?' em vez de '?'
         cursor.execute("""
         INSERT INTO metrics (hostname, cpu, ram, disk, ping)
         VALUES (?, ?, ?, ?, ?)
@@ -286,10 +285,10 @@ def save_metrics(device):
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        # --- ALTERADO DE '?' PARA '%s' ---
+        # --- ALTERADO DE '?' PARA '?' ---
         cursor.execute("""
         INSERT INTO metrics (hostname, cpu, ram, disk, ping)
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES (?, ?, ?, ?, ?)
         """, (
             device.get("hostname"),
             device.get("cpu", 0),
@@ -400,7 +399,7 @@ def obter_metricas_dispositivo(hostname):
         cursor.execute("""
             SELECT cpu, ram, disk, ping, created_at 
             FROM metrics 
-            WHERE hostname = %s 
+            WHERE hostname =? 
             ORDER BY id DESC LIMIT 1
         """, (hostname,))
         
@@ -578,7 +577,7 @@ def delete_user(username):
     try:
         with connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username=%s", (username,))
+            cursor.execute("DELETE FROM users WHERE username=?", (username,))
             conn.commit()
         return redirect('/users')
     except Exception as e:
@@ -608,7 +607,7 @@ def change_password():
 
         conn = connect_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=%s", (session["user"],))
+        cursor.execute("SELECT * FROM users WHERE username=?", (session["user"],))
         user = cursor.fetchone()
 
         if not user or not check_password_hash(user[2], current_password):
@@ -616,7 +615,7 @@ def change_password():
         elif new_password != confirm_password:
             flash("As senhas não coincidem!")
         else:
-            cursor.execute("UPDATE users SET password=? WHERE username=%s", (generate_password_hash(new_password), session["user"]))
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["user"]))
             conn.commit()
             flash("Senha alterada com sucesso!")
             conn.close()
@@ -742,7 +741,7 @@ def api_adicionar_descoberto():
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO dispositivos (hostname, ip, status) VALUES (%s, %s, 'online')", (hostname, ip))
+        cursor.execute("INSERT INTO dispositivos (hostname, ip, status) VALUES (?, ?, 'online')", (hostname, ip))
         conn.commit()
         conn.close()
         return jsonify({"success": True})
