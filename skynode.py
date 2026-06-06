@@ -1,23 +1,24 @@
 import os
-import sqlite3
-import socket
-import threading
-import json
+import io
 import time
+import json
+import uuid
+import socket
+import sqlite3
+import zipfile
+import platform
+import threading
 import requests
 import subprocess
-import uuid
-import platform
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify
+
+# Flask e suas extensões reunidos em blocos únicos
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify, send_file, abort
 from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
+
+# Bibliotecas de IA
 import ollama
-import io
-import zipfile
-from flask import Flask, request, send_file
-import pymysql  # <-- ADICIONE ESTA LINHA PERTO DOS OUTROS IMPORTS
-import pymysql.cursors
 
 # 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
 LIMITE_CPU = 50.0  # Se a CPU passar de 50%, dispara
