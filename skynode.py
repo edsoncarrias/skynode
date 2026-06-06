@@ -646,8 +646,10 @@ screenshot_port = 6002
 command_port = 6003
 """
     
-    # 3. Caminho onde o 'agent.exe' (que você compilou) está guardado no servidor
-    agent_exe_path = '/app/static/downloads/agent.exe'
+    # 3. Caminho Dinâmico: Procura a pasta 'downloads' na raiz do projeto
+    # Isso evita caminhos fixos como '/app/' que quebram entre Windows e Linux
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    agent_exe_path = os.path.join(base_dir, 'downloads', 'agent.exe')
     
     # Cria o arquivo ZIP diretamente na memória do servidor para envio rápido
     memory_file = io.BytesIO()
