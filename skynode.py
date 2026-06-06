@@ -929,11 +929,12 @@ if __name__ == "__main__":
         threading.Thread(target=command_server, daemon=True).start()
         threading.Thread(target=monitor_devices, daemon=True).start()
 
-        print("🔥 Servidor Web online em: http://127.0.0.1:5000")
-        socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+        print("🔥 Servidor Web online em: http://0.0.0.0:5000")
+        # Correção aplicada: adicionado allow_unsafe_werkzeug=True para rodar na Render
+        socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
 
     except Exception as erro_fatal:
         print("\n❌ --------------------------------------------------")
         print(f"🚨 ERRO CRÍTICO NA INICIALIZAÇÃO: {erro_fatal}")
         print("-------------------------------------------------- ❌\n")
-        input("Aperte ENTER para fechar...")
+        # O input() foi removido daqui para evitar o erro EOFError no servidor automatizado
