@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyNode - Mapa & Descoberta</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+    <style>
+        body { margin: 0; background: #0f172a; color: white; font-family: Segoe UI; overflow-x: hidden; }
+        .sidebar { width: 260px; height: 100vh; position: fixed; top: 0; left: 0; background: #111827; padding: 20px; display: flex; flex-direction: column; border-right: 1px solid #1e293b; }
+        .logo-container { text-align: center; margin-bottom: 25px; }
+        .logo-img { width: 210px; filter: drop-shadow(0 0 15px #38bdf8); }
+        .menu { flex: 1; margin-top: 20px; }
+        .menu a { text-decoration: none; color: white !important; }
+        .menu-item { padding: 14px; border-radius: 14px; margin-bottom: 12px; transition: .3s; font-weight: 500; }
+        .menu-item:hover { background: #1e293b; transform: translateX(5px); color: #38bdf8 !important; }
+        .logout-btn { text-decoration: none; text-align: center; background: linear-gradient(45deg, #ef4444, #dc2626); color: white !important; padding: 12px; border-radius: 20px; font-weight: bold; margin-top: auto; }
+        
+        .content { margin-left: 280px; padding: 30px; position: relative; }
+        .card-custom { background: #111827; border: 1px solid #1e293b; border-radius: 22px; padding: 25px; box-shadow: 0 0 20px rgba(0,0,0,.25); }
+        
+        #redeCanvas { width: 100%; height: 550px; background-color: #070b12; border: 1px solid #1e293b; border-radius: 16px; margin-top: 15px; }
+        .form-control { background-color: #0f172a !important; border: 1px solid #334155 !important; color: white !important; border-radius: 10px; }
+        
+        .tab-btn { background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 10px 20px; border-radius: 10px; font-weight: 600; margin-right: 10px; }
+        .tab-btn.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
+        
+        .modal-content { background-color: #111827; border: 1px solid #1e293b; border-radius: 20px; color: white; }
+        .modal-header { border-bottom: 1px solid #1e293b; }
+        .modal-footer { border-top: 1px solid #1e293b; }
+
+        /* Estilo do Card Lateral de Telemetria */
+        .info-card {
+            position: absolute;
+            top: 110px;
+            right: 50px;
+            width: 320px;
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid #38bdf8;
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+            z-index: 1000;
+            display: none;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+        .progress-custom { height: 8px; background-color: #1f2937; border-radius: 5px; margin-bottom: 15px; }
+        .progress-bar-custom { background: linear-gradient(90deg, #38bdf8, #2563eb); border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo-img">
+        </div>
+        <hr style="border-color: #1e293b;">
+        <div class="menu">
+            <a href="/dashboard"><div class="menu-item">🏠 Dashboard</div></a>
+            <a href="/dispositivos"><div class="menu-item">🖥️ Dispositivos</div></a>
+            <a href="/mapa"><div class="menu-item" style="background: #1e293b; color: #38bdf8 !important;">🗺️ Mapa da Rede</div></a>
+            <a href="/monitoramento"><div class="menu-item">📊 Monitoramento</div></a>
+            <a href="/configuracoes"><div class="menu-item">⚙️ Configurações</div></a>
+        </div>
+        <a href="/logout" class="logout-btn">🚪 Sair</a>
+    </div>
+
+    <div class="content">
+        <div id="infoCardDispositivo" class="info-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 id="cardHostname" class="text-info m-0" style="font-weight: 600;">Host</h5>
+                <button onclick="fecharCardInfo()" class="btn-close btn-close-white btn-sm" aria-label="Close"></button>
+            </div>
+            <p class="text-secondary mb-3" style="font-size: 14px;">IP: <span id="cardIP" class="text-white fw-bold">0.0.0.0</span></p>
+            
+            <div class="mb-2 d-flex justify-content-between align-items-center">
+                <span class="text-secondary small">Status</span>
+                <span id="cardStatus" class="badge bg-success">ONLINE</span>
+            </div>
+            
+            <hr style="border-color: #1e293b;">
+            
+            <div class="mb-1 d-flex justify-content-between small">
+                <span>Uso de CPU</span>
+                <span id="cardCpuText" class="fw-bold text-white">0%</span>
+            </div>
+            <div class="progress progress-custom">
+                <div id="cardCpuBar" class="progress-bar progress-bar-custom" style="width: 0%"></div>
+            </div>
+
+            <div class="mb-1 d-flex justify-content-between small">
+                <span>Memória RAM</span>
+                <span id="cardRamText" class="fw-bold text-white">0%</span>
+            </div>
+            <div class="progress progress-custom">
+                <div id="cardRamBar" class="progress-bar progress-bar-custom" style="width: 0%"></div>
+            </div>
+
+            <div class="mb-1 d-flex justify-content-between small">
+                <span>Disco HD</span>
+                <span id="cardHdText" class="fw-bold text-white">0%</span>
+            </div>
+            <div class="progress progress-custom mb-2">
+                <div id="cardHdBar" class="progress-bar progress-bar-custom" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>🗺️ Topologia & Descoberta Ativa</h1>
+            <div class="d-flex gap-2">
+                <button class="btn fw-bold px-3 text-white" style="background: #2563eb; border-radius: 10px;" data-bs-toggle="modal" data-bs-target="#modalCadastroManual">
+                    ➕ Cadastro Manual
+                </button>
+                <button class="tab-btn active" id="btnVerMapa" onclick="alternarVisao('mapa')">🗺️ Ver Mapa</button>
+                <button class="tab-btn" id="btnVerDescoberta" onclick="alternarVisao('descoberta')">📡 Descoberta de Rede</button>
+            </div>
+        </div>
+
+        <div class="card card-custom" id="secaoMapa">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 style="color: #38bdf8; margin:0;">Visualização de Infraestrutura Dinâmica</h5>
+                <div class="d-flex gap-2">
+                    <button onclick="salvarLayoutManualmente()" class="btn btn-sm btn-success fw-bold px-3">💾 Salvar Layout Atual</button>
+                    <button onclick="limparPosicoesSalvas()" class="btn btn-sm btn-outline-danger">🧹 Resetar Layout</button>
+                    <button onclick="carregarMapaRede()" class="btn btn-sm btn-outline-secondary">🔄 Atualizar Mapa</button>
+                </div>
+            </div>
+            <p class="text-secondary m-0 mt-1">Organize os dispositivos na tela. Clique duas vezes para ver os detalhes do hardware.</p>
+            <div id="redeCanvas"></div>
+        </div>
+
+        <div class="card card-custom d-none" id="secaoDescoberta">
+            <h5 class="text-warning">📡 Scanner de Descoberta por Varredura ICMP</h5>
+            <p class="text-secondary">Informe a sub-rede para buscar dispositivos respondendo na rede local (Ex: 192.168.1).</p>
+            
+            <div class="row g-2 align-items-end mb-4">
+                <div class="col-md-8">
+                    <label class="form-label text-secondary">Faixa de IP Base (Três primeiros octetos)</label>
+                    <input type="text" id="inputSubrede" class="form-control py-2" placeholder="Ex: 192.168.1">
+                </div>
+                <div class="col-md-4">
+                    <button type="button" id="btnScanner" onclick="executarScanRede()" class="btn btn-warning w-100 fw-bold py-2" style="border-radius: 10px;">
+                        🔍 Iniciar Varredura de Rede
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle m-0">
+                    <thead>
+                        <tr style="color: #94a3b8; border-bottom: 2px solid #1e293b;">
+                            <th>Endereço IP</th>
+                            <th>Status da Resposta</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaDescobertaBody">
+                        <tr><td colspan="3" class="text-center text-muted">Nenhuma varredura executada ainda.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalCadastroManual" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-info">➕ Cadastrar Host Manualmente</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="formCadastroManual">
+                        <div class="mb-3">
+                            <label class="form-label text-secondary">Nome do Host (Hostname)</label>
+                            <input type="text" id="manualHostname" class="form-control" placeholder="Ex: Servidor-Arquivos" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-secondary">Endereço IP</label>
+                            <input type="text" id="manualIP" class="form-control" placeholder="Ex: 192.168.1.250" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" onclick="salvarCadastroManual()" class="btn btn-info fw-bold text-dark">💾 Salvar no Mapa</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let networkInstance = null;
+        let localDataCache = null; // Armazena a resposta da API localmente
+
+        function alternarVisao(tipo) {
+            if(tipo === 'mapa') {
+                document.getElementById('secaoMapa').classList.remove('d-none');
+                document.getElementById('secaoDescoberta').classList.add('d-none');
+                document.getElementById('btnVerMapa').classList.add('active');
+                document.getElementById('btnVerDescoberta').classList.remove('active');
+                carregarMapaRede();
+            } else {
+                document.getElementById('secaoMapa').classList.add('d-none');
+                document.getElementById('secaoDescoberta').classList.remove('d-none');
+                document.getElementById('btnVerMapa').classList.remove('active');
+                document.getElementById('btnVerDescoberta').classList.add('active');
+                fecharCardInfo();
+            }
+        }
+
+        function fecharCardInfo() {
+            document.getElementById('infoCardDispositivo').style.display = 'none';
+        }
+
+        function limparPosicoesSalvas() {
+            if(confirm("Deseja resetar o layout e voltar à organização inicial?")) {
+                localStorage.removeItem('skynode_layout_positions');
+                carregarMapaRede();
+            }
+        }
+
+        // SALVAMENTO MANUAL: Varre todos os nós na tela e guarda as posições de uma vez só
+        function salvarLayoutManualmente() {
+            if (!networkInstance) return;
+            
+            let posicoesAtuais = {};
+            // Pegamos as coordenadas atuais de todos os nós gerados
+            let idsNos = [0]; 
+            if (localDataCache && localDataCache.dispositivos) {
+                localDataCache.dispositivos.forEach((_, index) => idsNos.push(index + 1));
+            }
+
+            idsNos.forEach(id => {
+                try {
+                    let pos = networkInstance.getPosition(id);
+                    posicoesAtuais["node_" + id] = { x: pos.x, y: pos.y };
+                } catch(e) {}
+            });
+
+            localStorage.setItem('skynode_layout_positions', JSON.stringify(posicoesAtuais));
+            alert("✅ Layout de rede salvo com sucesso!");
+        }
+
+        // MOTOR DO MAPA ATUALIZADO
+        async function carregarMapaRede() {
+            const container = document.getElementById('redeCanvas');
+            if (!container) return;
+
+            try {
+                const response = await fetch('/api/mapa/dados');
+                if (!response.ok) throw new Error("Erro na rota do mapa.");
+                const data = await response.json();
+                localDataCache = data; // Atualiza o cache local
+
+                // Recupera as posições do LocalStorage
+                let posicoesSalvas = JSON.parse(localStorage.getItem('skynode_layout_positions')) || {};
+
+                // Servidor Central
+                let centralPos = posicoesSalvas["node_0"] || { x: 0, y: 0 };
+                let nodes = [{ 
+                    id: 0, 
+                    label: '🖥️ SKY_NODE\n(Servidor Central)', 
+                    color: { background: '#0284c7', border: '#38bdf8' }, 
+                    font: { color: '#fff', size: 14, bold: true }, 
+                    shape: 'box', 
+                    margin: 12,
+                    x: centralPos.x,
+                    y: centralPos.y
+                }];
+                let edges = [];
+
+                if (data.dispositivos && data.dispositivos.length > 0) {
+                    data.dispositivos.forEach((disp, index) => {
+                        let idGerado = index + 1;
+                        let chavePos = "node_" + idGerado;
+                        let posVal = posicoesSalvas[chavePos] || undefined;
+
+                        nodes.push({
+                            id: idGerado,
+                            label: `🖥️ ${disp.hostname}\n(${disp.ip})`,
+                            title: undefined, // REMOVIDO: Sem balão de hover ao passar o mouse
+                            color: { 
+                                background: disp.status === 'online' ? '#065f46' : '#991b1b', 
+                                border: disp.status === 'online' ? '#34d399' : '#f87171' 
+                            },
+                            font: { color: '#fff' },
+                            shape: 'box',
+                            margin: 10,
+                            x: posVal ? posVal.x : undefined,
+                            y: posVal ? posVal.y : undefined
+                        });
+
+                        edges.push({ 
+                            from: 0, 
+                            to: idGerado, 
+                            color: { color: disp.status === 'online' ? '#34d399' : '#f87171' }, 
+                            width: 2 
+                        });
+                    });
+                }
+
+                const dataset = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+                
+                const options = {
+                    physics: { 
+                        enabled: false // Estático
+                    },
+                    edges: {
+                       smooth: false
+                    },
+                    interaction: { 
+                        dragNodes: true, 
+                        zoomView: true, 
+                        dragView: true,
+                        hover: false // Desativa interações de hover básicas do motor
+                    }
+                };
+
+                networkInstance = new vis.Network(container, dataset, options);
+
+                // EVENTO ALTERADO: CARD SÓ ABRE COM CLIQUE DUPLO (doubleClick)
+                networkInstance.on("doubleClick", function(params) {
+                    if (params.nodes.length > 0) {
+                        let nodeId = params.nodes[0];
+                        
+                        if(nodeId === 0) {
+                            document.getElementById('cardHostname').innerText = "SKY_NODE";
+                            document.getElementById('cardIP').innerText = "localhost";
+                            document.getElementById('cardStatus').className = "badge bg-primary";
+                            document.getElementById('cardStatus').innerText = "SERVIDOR CENTRAL";
+                            atualizarBarrasCard(10, 15, 8);
+                            document.getElementById('infoCardDispositivo').style.display = 'block';
+                            return;
+                        }
+
+                        let dispClipped = localDataCache.dispositivos[nodeId - 1];
+                        if (dispClipped) {
+                            document.getElementById('cardHostname').innerText = dispClipped.hostname;
+                            document.getElementById('cardIP').innerText = dispClipped.ip;
+                            
+                            if(dispClipped.status === 'online') {
+                                document.getElementById('cardStatus').className = "badge bg-success";
+                                document.getElementById('cardStatus').innerText = "ONLINE";
+                            } else {
+                                document.getElementById('cardStatus').className = "badge bg-danger";
+                                document.getElementById('cardStatus').innerText = "OFFLINE";
+                            }
+
+                            let cpu = dispClipped.cpu || 0;
+                            let ram = dispClipped.ram || 0;
+                            let hd = dispClipped.hd || 0;
+
+                            atualizarBarrasCard(cpu, ram, hd);
+                            document.getElementById('infoCardDispositivo').style.display = 'block';
+                        }
+                    }
+                });
+
+            } catch (error) {
+                container.innerHTML = `<div class="text-center text-danger py-5">❌ Erro ao renderizar mapa: ${error.message}</div>`;
+            }
+        }
+
+        function atualizarBarrasCard(cpu, ram, hd) {
+            document.getElementById('cardCpuText').innerText = cpu + "%";
+            document.getElementById('cardCpuBar').style.width = cpu + "%";
+            
+            document.getElementById('cardRamText').innerText = ram + "%";
+            document.getElementById('cardRamBar').style.width = ram + "%";
+            
+            document.getElementById('cardHdText').innerText = hd + "%";
+            document.getElementById('cardHdBar').style.width = hd + "%";
+        }
+
+        // MOTOR DO SCANNER AUTOMÁTICO
+        async function executarScanRede() {
+            const subrede = document.getElementById("inputSubrede").value.trim();
+            if(!subrede) {
+                alert("Por favor, informe a sub-rede.");
+                return;
+            }
+            const btn = document.getElementById("btnScanner");
+            const tbody = document.getElementById("tabelaDescobertaBody");
+
+            btn.disabled = true;
+            btn.innerText = "📡 Varrendo...";
+            tbody.innerHTML = `<tr><td colspan="3" class="text-center text-warning">⏳ Buscando dispositivos ativos...</td></tr>`;
+
+            try {
+                const response = await fetch(`/api/descoberta/scan?subrede=${subrede}`);
+                const data = await response.json();
+                tbody.innerHTML = "";
+                
+                if(!data.hosts_encontrados || data.hosts_encontrados.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Nenhum dispositivo respondeu na faixa informada.</td></tr>`;
+                    return;
+                }
+
+                data.hosts_encontrados.forEach(host => {
+                    tbody.innerHTML += `
+                        <tr style="border-bottom: 1px solid #1e293b;">
+                            <td class="text-info fw-bold">${host}</td>
+                            <td><span class="badge bg-success">ONLINE</span></td>
+                            <td>
+                                <button onclick="cadastrarDescoberto('${host}')" class="btn btn-sm btn-outline-primary fw-bold" style="border-radius:8px;">➕ Adicionar</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">❌ Erro na varredura.</td></tr>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "🔍 Iniciar Varredura de Rede";
+            }
+        }
+
+        function cadastrarDescoberto(ip) {
+            let nome = prompt(`Digite o nome para o IP ${ip}:`);
+            if(!nome) return;
+            fetch('/api/dispositivos/adicionar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hostname: nome, ip: ip })
+            }).then(res => res.ok ? (alert("✅ Adicionado!"), carregarMapaRede()) : alert("Erro"));
+        }
+
+        // SALVAR FORMULÁRIO DO MODAL MANUAL
+        async function salvarCadastroManual() {
+            const hostname = document.getElementById("manualHostname").value.trim();
+            const ip = document.getElementById("manualIP").value.trim();
+
+            if(!hostname || !ip) {
+                alert("Preencha todos os campos antes de salvar!");
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/dispositivos/adicionar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hostname: hostname, ip: ip })
+                });
+
+                if(response.ok) {
+                    alert("✅ Host cadastrado manualmente com sucesso!");
+                    document.getElementById("manualHostname").value = "";
+                    document.getElementById("manualIP").value = "";
+                    
+                    const modalEl = document.getElementById('modalCadastroManual');
+                    const modal = bootstrap.Modal.getInstance(modalEl);
+                    modal.hide();
+
+                    carregarMapaRede();
+                } else {
+                    alert("❌ Erro ao salvar o dispositivo no back-end.");
+                }
+            } catch (error) {
+                alert("❌ Falha de rede ao tentar cadastrar.");
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            carregarMapaRede();
+        });
+    </script>
+</body>
+</html>

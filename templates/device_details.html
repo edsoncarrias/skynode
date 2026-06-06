@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>SkyNode Device</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+
+body{
+    background:#0f172a;
+    color:white;
+    font-family:Segoe UI;
+    padding:30px;
+}
+
+.card-custom{
+    background:#1e293b;
+    border:none;
+    border-radius:20px;
+    padding:25px;
+    box-shadow:0 0 20px rgba(0,0,0,0.3);
+}
+
+.title{
+    color:#38bdf8;
+    margin-bottom:20px;
+    font-weight:bold;
+}
+
+.info{
+    font-size:18px;
+    margin-bottom:14px;
+}
+
+.info strong{
+    color:#e2e8f0;
+}
+
+.screenshot{
+    width:100%;
+    border-radius:15px;
+    border:2px solid #334155;
+    object-fit:cover;
+}
+
+.back-btn{
+    display:inline-block;
+    margin-top:20px;
+    background:#38bdf8;
+    color:white;
+    padding:12px 20px;
+    border-radius:12px;
+    text-decoration:none;
+    font-weight:bold;
+    transition:.3s;
+}
+
+.back-btn:hover{
+    background:#0ea5e9;
+    color:white;
+}
+
+.command-buttons{
+    margin-top:25px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.command-buttons .btn{
+    border-radius:12px;
+    font-weight:bold;
+    padding:10px 18px;
+}
+
+.status-box{
+    margin-top:20px;
+    margin-bottom:25px;
+}
+
+.device-image-title{
+    margin-bottom:15px;
+    color:#38bdf8;
+    font-size:20px;
+    font-weight:bold;
+}
+
+.metric-card{
+    background:#0f172a;
+    border-radius:18px;
+    padding:18px;
+    border:1px solid #334155;
+    height:100%;
+}
+
+.metric-title{
+    font-size:15px;
+    color:#cbd5e1;
+    margin-bottom:10px;
+}
+
+.metric-value{
+    font-size:22px;
+    font-weight:bold;
+}
+
+.progress{
+    height:22px;
+    border-radius:20px;
+    background:#1e293b;
+}
+
+.chart-box{
+    margin-top:35px;
+    background:#0f172a;
+    padding:20px;
+    border-radius:18px;
+    border:1px solid #334155;
+}
+
+canvas{
+    margin-top:15px;
+}
+
+@media(max-width:768px){
+
+    body{
+        padding:15px;
+    }
+
+    .command-buttons{
+        flex-direction:column;
+    }
+
+    .command-buttons .btn{
+        width:100%;
+    }
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="card card-custom">
+
+        <h1 class="title">
+            💻 {{ device.get("hostname", "N/A") }}
+        </h1>
+
+        <div class="row g-4">
+
+            <!-- =========================================
+            INFORMAÇÕES
+            ========================================= -->
+
+            <div class="col-md-6">
+
+                <div class="info">
+                    🖥️ Sistema:
+                    <strong>{{ device.get("system", "N/A") }}</strong>
+                </div>
+
+                <div class="info">
+                    📊 CPU:
+                    <strong>{{ device.get("cpu", 0) }}%</strong>
+                </div>
+
+                <div class="info">
+                    🧠 RAM:
+                    <strong>{{ device.get("ram", 0) }}%</strong>
+                </div>
+
+                <div class="info">
+                    💽 Disco:
+                    <strong>{{ device.get("disk", 0) }}%</strong>
+                </div>
+
+                <div class="info">
+                    🌐 IP Local:
+                    <strong>{{ device.get("local_ip", "N/A") }}</strong>
+                </div>
+
+                <div class="info">
+                    🌍 IP Público:
+                    <strong>{{ device.get("public_ip", "N/A") }}</strong>
+                </div>
+
+                <div class="info">
+                    📡 Ping:
+                    <strong>{{ device.get("ping", 0) }} ms</strong>
+                </div>
+
+                <!-- =========================================
+                STATUS
+                ========================================= -->
+
+                <div class="status-box">
+
+                    <span>Status:</span>
+
+                    {% if device.get("status") == "online" %}
+
+                    <span class="badge bg-success">
+                        🟢 Online
+                    </span>
+
+                    {% else %}
+
+                    <span class="badge bg-danger">
+                        🔴 Offline
+                    </span>
+
+                    {% endif %}
+
+                </div>
+
+                <!-- =========================================
+                MÉTRICAS
+                ========================================= -->
+
+                <div class="row g-3">
+
+                    <!-- CPU -->
+
+                    <div class="col-md-6">
+
+                        <div class="metric-card">
+
+                            <div class="metric-title">
+                                📊 Uso CPU
+                            </div>
+
+                            <div class="metric-value text-info">
+                                {{ device.get("cpu", 0) }}%
+                            </div>
+
+                            <div class="progress mt-3">
+
+                                <div
+                                    class="progress-bar bg-info"
+                                    style="width: {{ device.get('cpu', 0) }}%;"
+                                >
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- RAM -->
+
+                    <div class="col-md-6">
+
+                        <div class="metric-card">
+
+                            <div class="metric-title">
+                                🧠 Uso RAM
+                            </div>
+
+                            <div class="metric-value text-success">
+                                {{ device.get("ram", 0) }}%
+                            </div>
+
+                            <div class="progress mt-3">
+
+                                <div
+                                    class="progress-bar bg-success"
+                                    style="width: {{ device.get('ram', 0) }}%;"
+                                >
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- HD -->
+
+                    <div class="col-md-6">
+
+                        <div class="metric-card">
+
+                            <div class="metric-title">
+                                💽 Uso Disco
+                            </div>
+
+                            <div class="metric-value text-warning">
+                                {{ device.get("disk", 0) }}%
+                            </div>
+
+                            <div class="progress mt-3">
+
+                                <div
+                                    class="progress-bar bg-warning"
+                                    style="width: {{ device.get('disk', 0) }}%;"
+                                >
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <!-- PING -->
+
+                    <div class="col-md-6">
+
+                        <div class="metric-card">
+
+                            <div class="metric-title">
+                                📡 Latência
+                            </div>
+
+                            {% if device.get("ping", 0) > 150 %}
+
+                                <div class="metric-value text-danger">
+                                    {{ device.get("ping", 0) }} ms
+                                </div>
+
+                            {% elif device.get("ping", 0) > 80 %}
+
+                                <div class="metric-value text-warning">
+                                    {{ device.get("ping", 0) }} ms
+                                </div>
+
+                            {% else %}
+
+                                <div class="metric-value text-success">
+                                    {{ device.get("ping", 0) }} ms
+                                </div>
+
+                            {% endif %}
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <!-- =========================================
+                BOTÕES COMANDOS
+                ========================================= -->
+
+                <div class="command-buttons">
+
+                    <a
+                        href="/send_command/{{ device.get('hostname') }}/shutdown"
+                        class="btn btn-danger"
+                    >
+                        🔴 Desligar
+                    </a>
+
+                    <a
+                        href="/send_command/{{ device.get('hostname') }}/restart"
+                        class="btn btn-warning"
+                    >
+                        🔄 Reiniciar
+                    </a>
+
+                    <a
+                        href="/send_command/{{ device.get('hostname') }}/notepad"
+                        class="btn btn-info"
+                    >
+                        📝 Abrir Notepad
+                    </a>
+
+                    <a
+                        href="/terminal/{{ device.hostname }}"
+                        class="btn btn-dark"
+                    >
+                        💻 Terminal
+                    </a>
+
+                    <a
+                        href="/monitor/{{ device.hostname }}"
+                        class="btn btn-primary"
+                    >
+                        📊 Monitoramento
+                    </a>
+
+                    <a
+                        href="/viewer/{{ device.hostname }}"
+                        class="btn btn-danger"
+                    >
+                        🖥 Controle Remoto
+                    </a>
+
+                </div>
+
+                <!-- =========================================
+                VOLTAR
+                ========================================= -->
+
+                <a href="/dashboard" class="back-btn">
+                    ⬅ Voltar Dashboard
+                </a>
+
+            </div>
+
+            <!-- =========================================
+            SCREENSHOT
+            ========================================= -->
+
+            <div class="col-md-6">
+
+                <div class="device-image-title">
+                    📸 Screenshot do Dispositivo
+                </div>
+
+                <img
+                    src="/screenshots/{{ screenshot }}"
+                    class="screenshot"
+                    alt="Screenshot do dispositivo"
+                >
+
+                <!-- =========================================
+                GRÁFICO
+                ========================================= -->
+
+                <div class="chart-box">
+
+                    <h3 class="title">
+                        📈 Histórico em Tempo Real
+                    </h3>
+
+                    <canvas id="historyChart"></canvas>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================================
+SCRIPTS
+========================================= -->
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+
+const ctx = document.getElementById("historyChart");
+
+let historyChart = null;
+
+async function loadHistory(){
+
+    try{
+
+        const response = await fetch(
+            "/api/metrics/{{ device.hostname }}"
+        );
+
+        const data = await response.json();
+
+        const labels = data.map(
+            d => d.time
+        );
+
+        const cpu = data.map(
+            d => d.cpu
+        );
+
+        const ram = data.map(
+            d => d.ram
+        );
+
+        const disk = data.map(
+            d => d.disk
+        );
+
+        if(historyChart){
+            historyChart.destroy();
+        }
+
+        historyChart = new Chart(ctx, {
+
+            type:"line",
+
+            data:{
+
+                labels:labels,
+
+                datasets:[
+
+                    {
+                        label:"CPU %",
+                        data:cpu,
+                        borderColor:"#38bdf8",
+                        backgroundColor:"#38bdf8",
+                        tension:.3
+                    },
+
+                    {
+                        label:"RAM %",
+                        data:ram,
+                        borderColor:"#22c55e",
+                        backgroundColor:"#22c55e",
+                        tension:.3
+                    },
+
+                    {
+                        label:"DISCO %",
+                        data:disk,
+                        borderColor:"#f59e0b",
+                        backgroundColor:"#f59e0b",
+                        tension:.3
+                    }
+
+                ]
+
+            },
+
+            options:{
+
+                responsive:true,
+
+                plugins:{
+                    legend:{
+                        labels:{
+                            color:"white"
+                        }
+                    }
+                },
+
+                scales:{
+
+                    x:{
+                        ticks:{
+                            color:"white"
+                        },
+                        grid:{
+                            color:"#334155"
+                        }
+                    },
+
+                    y:{
+                        beginAtZero:true,
+                        max:100,
+                        ticks:{
+                            color:"white"
+                        },
+                        grid:{
+                            color:"#334155"
+                        }
+                    }
+
+                }
+
+            }
+
+        });
+
+    }
+
+    catch(error){
+
+        console.log(
+            "Erro gráfico:",
+            error
+        );
+
+    }
+
+}
+
+loadHistory();
+
+setInterval(() => {
+
+    loadHistory();
+
+}, 5000);
+
+/* AUTO RELOAD SCREENSHOT */
+
+setInterval(() => {
+
+    const img = document.querySelector(".screenshot");
+
+    img.src =
+        "/screenshots/{{ screenshot }}?t=" +
+        new Date().getTime();
+
+}, 5000);
+
+</script>
+
+</body>
+</html>

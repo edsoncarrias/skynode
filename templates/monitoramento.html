@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyNode - Monitoramento</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; background: #0f172a; color: white; font-family: Segoe UI; overflow-x: hidden; }
+        .sidebar { width: 260px; height: 100vh; position: fixed; top: 0; left: 0; background: #111827; padding: 20px; display: flex; flex-direction: column; border-right: 1px solid #1e293b; }
+        .logo-container { text-align: center; margin-bottom: 25px; }
+        .logo-img { width: 210px; filter: drop-shadow(0 0 15px #38bdf8); }
+        .menu { flex: 1; margin-top: 20px; }
+        .menu a { text-decoration: none; color: white !important; }
+        .menu-item { padding: 14px; border-radius: 14px; margin-bottom: 12px; transition: .3s; font-weight: 500; }
+        .menu-item:hover { background: #1e293b; transform: translateX(5px); color: #38bdf8 !important; }
+        .logout-btn { text-decoration: none; text-align: center; background: linear-gradient(45deg, #ef4444, #dc2626); color: white !important; padding: 12px; border-radius: 20px; font-weight: bold; margin-top: auto; }
+        
+        /* Ajuste fino na margem do conteúdo para não encostar no menu */
+        .content { margin-left: 280px; padding: 30px; }
+        .card-custom { background: #111827; border: 1px solid #1e293b; border-radius: 22px; padding: 25px; box-shadow: 0 0 20px rgba(0,0,0,.25); }
+        .alert-history-box { background: #1e293b; border-left: 5px solid #ffc107; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo-img">
+        </div>
+        <hr style="border-color: #1e293b;">
+        <div class="menu">
+            <a href="/dashboard"><div class="menu-item">🏠 Dashboard</div></a>
+            <a href="/dispositivos"><div class="menu-item">🖥️ Dispositivos</div></a>
+            <a href="/mapa"><div class="menu-item">🗺️ Mapa da Rede</div></a>
+            <a href="/monitoramento"><div class="menu-item" style="background: #1e293b; color: #38bdf8 !important;">📊 Monitoramento</div></a>
+            <a href="/configuracoes"><div class="menu-item">⚙️ Configurações</div></a>
+        </div>
+            <a href="/logout" class="logout-btn">🚪 Sair</a>
+    </div>
+
+    <div class="content">
+        <h1 class="mb-4">📊 Central de Monitoramento Global</h1>
+        
+        <div class="card card-custom mb-4">
+            <h5 class="mb-4 text-warning">🚨 Histórico de Incidentes e Análises de IA</h5>
+            <div id="globalAlertsHistory">
+                <div class="text-center text-secondary py-4">Buscando registros de incidentes...</div>
+            </div>
+        </div>
+
+        <div class="card card-custom">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 style="color: #38bdf8; font-weight: 600; margin: 0;">📋 Gerenciador de Tarefas Remoto</h5>
+                <button onclick="solicitarProcessos()" id="btnAtualizar" class="btn btn-sm fw-bold" style="background: #38bdf8; color: #0f172a; border-radius: 10px; padding: 8px 16px;">
+                    🔍 Atualizar Processos
+                </button>
+            </div>
+            
+            <div class="table-responsive" id="blocoProcessos">
+                <table class="table table-dark table-hover align-middle m-0">
+                    <thead>
+                        <tr style="color: #94a3b8; border-bottom: 2px solid #1e293b;">
+                            <th>PID</th>
+                            <th>Nome do Processo</th>
+                            <th>Uso de CPU</th>
+                            <th>Uso de RAM</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaProcessosBody">
+                        <tr><td colspan="4" class="text-center text-muted">Nenhum dado solicitado ainda.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+
+    <script>
+        // Inicializa a conexão do WebSocket com o servidor Flask
+        
+        const socket = io();
+
+        async function loadGlobalAlerts() {
+            try {
+                const response = await fetch("/api/alerts");
+                const data = await response.json();
+                const container = document.getElementById("globalAlertsHistory");
+                container.innerHTML = "";
+
+                if(data.length === 0) {
+                    container.innerHTML = `<div class="text-center text-secondary py-4">Provedor limpo. Nenhum alerta crítico registrado no momento.</div>`;
+                    return;
+                }
+
+                data.reverse().forEach(alert => {
+                    container.innerHTML += `
+                        <div class="alert-history-box">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="fw-bold text-white fs-5">💻 Host: ${alert.hostname || 'Desconhecido'}</span>
+                                <span class="badge bg-danger">CRÍTICO</span>
+                            </div>
+                            <div class="mb-2 text-warning fw-semibold">${alert.text}</div>
+                            <div style="font-size: 0.95em; color: #cbd5e1; background: #0f172a; padding: 12px; border-radius: 8px; border: 1px solid #334155;">
+                                🤖 <strong>Diagnóstico da IA Local:</strong> ${alert.ai_analysis}
+                            </div>
+                            <div class="mt-2 text-end">
+                                <span class="text-secondary" style="font-size: 0.85em;">Comando Recomendado: <code style="color: #ffc107;">${alert.ai_command}</code></span>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch(error) {
+                console.error("Erro ao carregar histórico global:", error);
+            }
+        }
+
+        // Executa o carregador automático de alertas
+        loadGlobalAlerts();
+        setInterval(loadGlobalAlerts, 5000);
+
+        // FUNÇÃO DO GERENCIADOR DE TAREFAS - RECONSTRUÇÃO FORÇADA DE STRING
+        async function solicitarProcessos() {
+            let hostname = prompt("Digite o nome do Computador (Hostname) cadastrado para buscar os processos:");
+            if (!hostname) return;
+
+            const btn = document.getElementById("btnAtualizar");
+            const tbody = document.getElementById("tabelaProcessosBody");
+            
+            btn.disabled = true;
+            btn.innerText = "⏳ Buscando no Agente...";
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-warning">⏳ Aguardando check-in do agente (pode levar até 15s)...</td></tr>`;
+
+            try {
+                const response = await fetch(`/api/processos/${hostname}`);
+                if (!response.ok) throw new Error("Sem resposta do servidor.");
+                
+                const data = await response.json();
+                
+                // Pega a string que veio do Python de qualquer lugar que ela esteja
+                let textoBruto = data.raw_output || (typeof data === 'string' ? data : JSON.stringify(data));
+                
+                console.log("Texto recebido do Flask:", textoBruto);
+
+                // CORREÇÃO ULTRA-AGRESSIVA: 
+                if (!textoBruto.trim().startsWith("[")) {
+                    if (textoBruto.includes('{"pid":')) {
+                        textoBruto = textoBruto.substring(textoBruto.indexOf('{"pid":'));
+                    } else if (textoBruto.trim().startsWith('"')) {
+                        textoBruto = '{"pid": 0, "name": ' + textoBruto;
+                    }
+                    textoBruto = "[" + textoBruto;
+                }
+                
+                if (!textoBruto.trim().endsWith("]")) {
+                    if (textoBruto.trim().endsWith("}")) {
+                        textoBruto = textoBruto + "]";
+                    } else {
+                        textoBruto = textoBruto + "}]";
+                    }
+                }
+
+                let listaProcessos = [];
+                try {
+                    listaProcessos = JSON.parse(textoBruto);
+                } catch (e) {
+                    console.warn("JSON.parse falhou, usando modo de emergência por Texto.");
+                    let blocos = textoBruto.split('},');
+                    blocos.forEach(bloco => {
+                        let pidMatch = bloco.match(/"pid":\s*(\d+)/);
+                        let nameMatch = bloco.match(/"name":\s*"([^"]+)"/);
+                        let cpuMatch = bloco.match(/"cpu":\s*([\d.]+)/);
+                        let ramMatch = bloco.match(/"ram":\s*([\d.]+)/);
+                        
+                        if (nameMatch) {
+                            listaProcessos.push({
+                                pid: pidMatch ? pidMatch[1] : 'N/A',
+                                name: nameMatch[1],
+                                cpu: cpuMatch ? cpuMatch[1] : 0,
+                                ram: ramMatch ? ramMatch[1] : 0
+                            });
+                        }
+                    });
+                }
+
+                // Renderiza na tabela
+                if (listaProcessos.length > 0) {
+                    let html = '';
+                    listaProcessos.forEach(p => {
+                        html += `
+                            <tr style="border-bottom: 1px solid #1e293b;">
+                                <td><span style="color: #64748b;">${p.pid}</span></td>
+                                <td style="color: #38bdf8; font-weight: 600;">${p.name}</td>
+                                <td><span class="badge" style="background: #1e293b; color: #94a3b8;">${p.cpu}%</span></td>
+                                <td><span class="badge" style="background: #0369a1; color: #e0f2fe;">${p.ram}%</span></td>
+                            </tr>
+                        `;
+                    });
+                    tbody.innerHTML = html;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">⚠️ O agente enviou dados vazios ou ilegíveis.</td></tr>`;
+                }
+
+            } catch (error) {
+                console.error("Erro no JS:", error);
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">❌ Falha ao processar resposta do Agente.</td></tr>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "🔍 Atualizar Processos";
+            }
+        }
+
+        // RETORNO DO AGENTE
+        socket.on('atualizar_tela_processos', function(data) {
+            let html = '';
+            
+            data.processos.forEach(p => {
+                html += `
+                    <tr style="border-bottom: 1px solid #1e293b;">
+                        <td><span style="color: #64748b;">${p.pid}</span></td>
+                        <td style="color: #38bdf8; font-weight: 600;">${p.name}</td>
+                        <td><span class="badge" style="background: #1e293b; color: #94a3b8;">${p.cpu}%</span></td>
+                        <td><span class="badge" style="background: #0369a1; color: #e0f2fe;">${p.ram}%</span></td>
+                    </tr>
+                `;
+            });
+            
+            document.getElementById("tabelaProcessosBody").innerHTML = html;
+        });
+    </script>
+</body>
+</html>

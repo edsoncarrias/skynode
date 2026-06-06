@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+
+<meta charset="UTF-8">
+
+<title>SkyNode Alerts</title>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<style>
+
+body{
+    background:#0f172a;
+    color:white;
+    font-family:Arial;
+    margin:0;
+    padding:20px;
+}
+
+.top{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:20px;
+}
+
+h1{
+    margin:0;
+}
+
+button{
+    background:#2563eb;
+    border:none;
+    color:white;
+    padding:10px 15px;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.card{
+    background:#1e293b;
+    padding:15px;
+    border-radius:10px;
+    margin-bottom:10px;
+    border-left:5px solid #ef4444;
+}
+
+.time{
+    color:#94a3b8;
+    font-size:12px;
+}
+
+.total{
+    background:#dc2626;
+    padding:8px 12px;
+    border-radius:10px;
+    font-weight:bold;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="top">
+
+<h1>🚨 Alertas SkyNode</h1>
+
+<div>
+
+<span class="total">
+Total:
+<span id="totalAlerts">0</span>
+</span>
+
+<button onclick="window.location='/dashboard'">
+⬅ Voltar
+</button>
+
+</div>
+
+</div>
+
+<div id="alertsContainer">
+
+<div class="card">
+Nenhum alerta encontrado.
+</div>
+
+</div>
+
+<script>
+
+const socket = io()
+
+async function loadAlerts(){
+
+    try{
+
+        const response = await fetch("/api/all_alerts")
+
+        const alerts = await response.json()
+
+        const container =
+            document.getElementById(
+                "alertsContainer"
+            )
+
+        const total =
+            document.getElementById(
+                "totalAlerts"
+            )
+
+        total.innerText = alerts.length
+
+        if(alerts.length === 0){
+
+            container.innerHTML = `
+                <div class="card">
+                    Nenhum alerta encontrado.
+                </div>
+            `
+
+            return
+        }
+
+        container.innerHTML = ""
+
+        alerts.forEach(alert => {
+
+            container.innerHTML += `
+
+            <div class="card">
+
+                <h3>${alert.hostname}</h3>
+
+                <p>${alert.message}</p>
+
+                <div class="time">
+                    ${alert.created_at}
+                </div>
+
+            </div>
+
+            `
+
+        })
+
+    }catch(error){
+
+        console.log(error)
+
+    }
+
+}
+
+socket.on("new_alert", () => {
+
+    loadAlerts()
+
+})
+
+loadAlerts()
+
+setInterval(loadAlerts, 5000)
+
+</script>
+
+</body>
+</html>

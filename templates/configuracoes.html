@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyNode - Configurações</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; background: #0f172a; color: white; font-family: Segoe UI; overflow-x: hidden; }
+        .sidebar { width: 260px; height: 100vh; position: fixed; top: 0; left: 0; background: #111827; padding: 20px; display: flex; flex-direction: column; border-right: 1px solid #1e293b; }
+        .logo-container { text-align: center; margin-bottom: 25px; }
+        .logo-img { width: 210px; filter: drop-shadow(0 0 15px #38bdf8); }
+        .menu { flex: 1; margin-top: 20px; }
+        .menu a { text-decoration: none; color: white !important; }
+        .menu-item { padding: 14px; border-radius: 14px; margin-bottom: 12px; transition: .3s; font-weight: 500; }
+        .menu-item:hover { background: #1e293b; transform: translateX(5px); color: #38bdf8 !important; }
+        .logout-btn { text-decoration: none; text-align: center; background: linear-gradient(45deg, #ef4444, #dc2626); color: white !important; padding: 12px; border-radius: 20px; font-weight: bold; margin-top: auto; }
+        
+        /* Conteúdo Principal */
+        .content { margin-left: 280px; padding: 30px; }
+        .card-custom { background: #111827; border: 1px solid #1e293b; border-radius: 22px; padding: 25px; box-shadow: 0 0 20px rgba(0,0,0,.25); }
+        
+        /* Inputs Customizados Estilo Dark */
+        .form-control, .form-select { background-color: #0f172a !important; border: 1px solid #334155 !important; color: white !important; border-radius: 10px; padding: 10px 15px; }
+        .form-control:focus, .form-select:focus { border-color: #38bdf8 !important; box-shadow: 0 0 10px rgba(56, 189, 248, 0.2) !important; }
+        .form-label { color: #94a3b8; font-weight: 500; margin-bottom: 6px; font-size: 0.95em; }
+        
+        /* Sistema de Abas Internas Estilizado */
+        .nav-pills .nav-link { color: #94a3b8; padding: 14px 20px; border-radius: 12px; font-weight: 500; text-align: left; transition: 0.2s; margin-bottom: 5px; }
+        .nav-pills .nav-link:hover { background: #1e293b; color: white; }
+        .nav-pills .nav-link.active { background: #1e293b !important; color: #38bdf8 !important; font-weight: 600; border-left: 4px solid #38bdf8; border-radius: 0 12px 12px 0; }
+        
+        /* Terminal de saída do Ping */
+        .terminal-output { background: #070b12; border: 1px solid #1e293b; border-radius: 12px; font-family: monospace; padding: 15px; color: #a7f3d0; font-size: 0.9em; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo-img">
+        </div>
+        <hr style="border-color: #1e293b;">
+        <div class="menu">
+            <a href="/dashboard"><div class="menu-item">🏠 Dashboard</div></a>
+            <a href="/dispositivos"><div class="menu-item">🖥️ Dispositivos</div></a>
+            <a href="/mapa"><div class="menu-item">🗺️ Mapa da Rede</div></a>
+            <a href="/monitoramento"><div class="menu-item">📊 Monitoramento</div></a>
+            <a href="/configuracoes"><div class="menu-item" style="background: #1e293b; color: #38bdf8 !important;">⚙️ Configurações</div></a>
+        </div>
+            <a href="/logout" class="logout-btn">🚪 Sair</a>
+    </div>
+
+    <div class="content">
+        <h1 class="mb-4">⚙️ Painel de Configurações</h1>
+        
+        <div class="card card-custom">
+            <div class="row">
+                <div class="col-md-3 border-end style-tabs" style="border-color: #1e293b !important;">
+                    <div class="nav flex-column nav-pills me-3" id="v-pills-tab" role="tablist" aria-orientation="vertical">
+                        <button class="nav-link active" id="tab-rede" data-bs-toggle="pill" data-bs-target="#conteudo-rede" type="button" role="tab">🌐 Rede & Servidor</button>
+                        <button class="nav-link" id="tab-ping-teste" data-bs-toggle="pill" data-bs-target="#conteudo-ping-teste" type="button" role="tab">🔍 Testar ICMP / Ping</button>
+                        <button class="nav-link" id="tab-alertas" data-bs-toggle="pill" data-bs-target="#conteudo-alertas" type="button" role="tab">🚨 Limites de Alerta</button>
+                        <button class="nav-link" id="tab-ia" data-bs-toggle="pill" data-bs-target="#conteudo-ia" type="button" role="tab">🤖 Inteligência Artificial</button>
+                        <button class="nav-link" id="tab-banco" data-bs-toggle="pill" data-bs-target="#conteudo-banco" type="button" role="tab">🗄️ Banco de Dados</button>
+                    </div>
+                </div>
+
+                <div class="col-md-9 ps-4">
+                    <div class="tab-content" id="v-pills-tabContent">
+                        
+                        <div class="tab-pane fade show active" id="conteudo-rede" role="tabpanel">
+                            <form id="formConfigRede" onsubmit="salvarConfiguracoes(event)">
+                                <h4 class="mb-4" style="color: #38bdf8;">🌐 Parâmetros de Rede & Servidor</h4>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Porta do Painel Web (Flask)</label>
+                                        <input type="number" class="form-control" name="porta_web" value="5000">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Porta do Servidor TCP (Agentes)</label>
+                                        <input type="number" class="form-control" name="porta_tcp" value="6003">
+                                    </div>
+                                    <div class="col-md-12">
+                                        <label class="form-label">Intervalo de Check-in / Keep-Alive (segundos)</label>
+                                        <input type="number" class="form-control" name="intervalo_checkin" value="15">
+                                        <small class="text-secondary">Tempo limite para o agente responder antes de ser marcado como offline.</small>
+                                    </div>
+                                </div>
+                                <div class="text-end mt-5 border-top pt-3" style="border-color: #1e293b !important;">
+                                    <button type="submit" class="btn btn-salvar fw-bold px-4 py-2" style="background: #38bdf8; color: #0f172a; border-radius: 10px;">💾 Salvar Rede</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="tab-pane fade" id="conteudo-ping-teste" role="tabpanel">
+                            <h4 class="mb-4" style="color: #38bdf8;">🔍 Diagnóstico de Conectividade Interna</h4>
+                            <p class="text-secondary">Verifique o status de resposta de qualquer IP ou Hostname diretamente da máquina do servidor.</p>
+                            
+                            <div class="row g-2 align-items-end mb-4">
+                                <div class="col-sm-9">
+                                    <label class="form-label">Endereço IP ou Hostname para testar</label>
+                                    <input type="text" id="inputPingIp" class="form-control" placeholder="Ex: 192.168.1.50 ou google.com">
+                                </div>
+                                <div class="col-sm-3">
+                                    <button type="button" id="btnDispararPing" onclick="executarPingRede()" class="btn fw-bold w-100 py-2" style="background: #10b981; color: white; border-radius: 10px;">
+                                        ⚡ Disparar Ping
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="d-none" id="containerResultadoPing">
+                                <h6 class="text-secondary mb-2">Saída do Prompt de Comando:</h6>
+                                <div class="terminal-output" id="terminalPingOutput">Aguardando disparo...</div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane fade" id="conteudo-alertas" role="tabpanel">
+                            <form id="formConfigAlertas" onsubmit="salvarConfiguracoes(event)">
+                                <h4 class="mb-4 text-warning">🚨 Limites Críticos (Thresholds)</h4>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Gatilho de Uso de CPU (%)</label>
+                                        <input type="number" class="form-control" name="limite_cpu" value="80">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Gatilho de Uso de RAM (%)</label>
+                                        <input type="number" class="form-control" name="limite_ram" value="85">
+                                    </div>
+                                    <div class="col-md-12">
+                                        <label class="form-label">Gatilho de Latência Máxima / Ping (ms)</label>
+                                        <input type="number" class="form-control" name="limite_ping" value="250">
+                                        <small class="text-secondary">Evita falsos alertas se o ping oscilar abaixo desse valor.</small>
+                                    </div>
+                                </div>
+                                <div class="text-end mt-5 border-top pt-3" style="border-color: #1e293b !important;">
+                                    <button type="submit" class="btn btn-salvar fw-bold px-4 py-2" style="background: #38bdf8; color: #0f172a; border-radius: 10px;">💾 Salvar Limites</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="tab-pane fade" id="conteudo-ia" role="tabpanel">
+                            <form id="formConfigIA" onsubmit="salvarConfiguracoes(event)">
+                                <h4 class="mb-4" style="color: #38bdf8;">🤖 Integração com Inteligência Artificial</h4>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label">Provedor de IA do Sistema</label>
+                                        <select class="form-select" name="provedor_ia">
+                                            <option value="ollama">Ollama (IA Local / Llama 3)</option>
+                                            <option value="openai">OpenAI (ChatGPT API)</option>
+                                            <option value="gemini" selected>Google Gemini API</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Modelo de Linguagem (Model)</label>
+                                        <input type="text" class="form-control" name="modelo_ia" value="gemini-1.5-flash">
+                                    </div>
+                                    <div class="col-md-12">
+                                        <label class="form-label">Chave de Conexão da API (API Key)</label>
+                                        <input type="password" class="form-control" name="api_key_ia" placeholder="••••••••••••••••••••••••••••••••">
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="form-check form-switch mt-2">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="analiseAutomatica" name="analise_automatica" checked>
+                                            <label class="form-check-label text-white" for="analiseAutomatica">Análise Automática de IA ao gerar incidentes</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-end mt-5 border-top pt-3" style="border-color: #1e293b !important;">
+                                    <button type="submit" class="btn btn-salvar fw-bold px-4 py-2" style="background: #38bdf8; color: #0f172a; border-radius: 10px;">💾 Salvar IA</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="tab-pane fade" id="conteudo-banco" role="tabpanel">
+                            <h4 class="mb-4 text-danger">🗄️ Manutenção & Banco de Dados</h4>
+                            <div class="row g-3">
+                                <div class="col-md-12 mb-3">
+                                    <p class="text-secondary">Gerencie o armazenamento interno do seu arquivo SQLite local (<code style="color: #ffc107;">database.db</code>).</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <button type="button" onclick="limparLogs()" class="btn btn-outline-warning w-100 fw-bold py-2" style="border-radius: 10px;">
+                                        🧹 Limpar Histórico de Logs
+                                    </button>
+                                    <small class="text-secondary d-block mt-1">Apaga registros de métricas antigos com mais de 30 dias.</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <button type="button" onclick="resetFabrica()" class="btn btn-outline-danger w-100 fw-bold py-2" style="border-radius: 10px;">
+                                        🚨 Resetar de Fábrica
+                                    </button>
+                                    <small class="text-secondary d-block mt-1">Apaga todo o banco de dados e recria as tabelas do zero.</small>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // FUNÇÃO DE BUSCA E DISPARO DE PING REAIS NA REDE
+        async function executarPingRede() {
+            const ipTarget = document.getElementById("inputPingIp").value.trim();
+            if(!ipTarget) {
+                alert("Por favor, digite um endereço IP ou Hostname válido!");
+                return;
+            }
+
+            const btn = document.getElementById("btnDispararPing");
+            const boxResultado = document.getElementById("containerResultadoPing");
+            const terminal = document.getElementById("terminalPingOutput");
+
+            btn.disabled = true;
+            btn.innerText = "⚡ Pingando...";
+            boxResultado.classList.remove("d-none");
+            terminal.innerHTML = `Enviando pacotes ICMP para ${ipTarget}... Aguardando retorno da rede...`;
+            terminal.style.color = "#a7f3d0"; 
+
+            try {
+                const response = await fetch(`/api/diagnostico/ping?target=${ipTarget}`);
+                const data = await response.json();
+
+                if (response.ok && data.status === "online") {
+                    terminal.style.color = "#4ade80"; // Verde se responder
+                    terminal.innerHTML = `🟢 DISPOSITIVO ONLINE\n\n${data.output}`;
+                } else {
+                    terminal.style.color = "#f87171"; // Vermelho se falhar ou der timeout
+                    terminal.innerHTML = `🔴 DISPOSITIVO INACESSÍVEL / TIMEOUT\n\n${data.output || 'Sem resposta do host.'}`;
+                }
+            } catch (error) {
+                terminal.style.color = "#f87171";
+                terminal.innerHTML = "❌ Erro interno ao tentar executar o comando de ping no servidor.";
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "⚡ Disparar Ping";
+            }
+        }
+
+        // SALVAR CONFIGURAÇÕES VIA API COMUNICAÇÃO
+        async function salvarConfiguracoes(event) {
+            event.preventDefault();
+            const formAtivo = event.target;
+            const btn = formAtivo.querySelector('.btn-salvar');
+            
+            btn.disabled = true;
+            btn.innerText = "⏳ Gravando...";
+
+            const formData = new FormData(formAtivo);
+            const payload = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch('/api/configuracoes/salvar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify
