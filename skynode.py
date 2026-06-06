@@ -194,14 +194,17 @@ def check_alerts(device):
 # =========================================
 # BANCO DE DADOS (CENTRALIZADO)
 # =========================================
+# =========================================
+# BANCO DE DADOS (CENTRALIZADO NA NUVEM)
+# =========================================
 def connect_db():
-   # Conecta no MariaDB configurado no Docker Compose
+    # Conecta no MySQL gratuito da nuvem Clever Cloud
     return pymysql.connect(
-        host='127.0.0.1',
-        port=3307,
-        user='skynode_user',
-        password='sua_senha_segura',
-        database='skynode_db',
+        host='COLOQUE_AQUI_O_TEXTO_DO_HOSPEDAR',
+        port=COLOQUE_AQUI_A_PORTA_GERALMENTE_3306,
+        user='COLOQUE_AQUI_O_TEXTO_DO_USUARIO',
+        password='COLOQUE_AQUI_A_TUA_SENHA',
+        database='COLOQUE_AQUI_O_NOME_DO_DATABASE',
         autocommit=True
     )
 
