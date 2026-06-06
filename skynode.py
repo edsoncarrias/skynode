@@ -84,9 +84,11 @@ def ai_analyze_alert(message):
 
 # =========================================
 # TELEGRAM CONFIG
+# AGORA O CÓDIGO BUSCA DO SISTEMA, SEM EXPOR NADA NO GITHUB!
 # =========================================
-TELEGRAM_TOKEN = "8844057989:AAGryczfOvyJugq996w-eI0bbSQMd0RmsZw"
-TELEGRAM_CHAT_ID = "959475547"
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_telegram_alert(message):
     try:
