@@ -913,6 +913,121 @@ def handle_agent_data(payload):
     dados = json.loads(payload) if isinstance(payload, str) else payload
     verificar_limites_RMM(dados)
 
+# ==============================================================================
+# CONTROLE VIA HTTP - ROTAS PARA O AGENTE DA RENDER
+# ==============================================================================
+
+@app.route('/api/status', methods=['POST'])
+def api_receber_status():
+    try:
+        dados = request.get_json()
+        if not dados:
+            return jsonify({"status": "erro", "message": "Sem dados"}), 400
+            
+        hostname = dados.get('hostname')
+        
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # Garante que a tabela exista no SQLite
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS dispositivos (
+                hostname TEXT PRIMARY KEY,
+                system TEXT,
+                cpu REAL,
+                ram REAL,
+                disk REAL,
+                ping REAL,
+                local_ip TEXT,
+                public_ip TEXT,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Atualiza ou Insere o status do PC
+        cursor.execute('''
+            INSERT INTO dispositivos (hostname, system, cpu, ram, disk, ping, local_ip, public_ip, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(hostname) DO UPDATE SET
+                system=excluded.system,
+                cpu=excluded.cpu,
+                ram=excluded.ram,
+                disk=excluded.disk,
+                ping=excluded.ping,
+                local_ip=excluded.local_ip,
+                public_ip=excluded.public_ip,
+                last_seen=CURRENT_TIMESTAMP
+        ''')
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"status": "sucesso"}), 200
+    except Exception as e:
+        print(f"Erro na API de Status: {e}")
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+
+@app.route('/api/screenshot', methods=['POST'])
+def api_receber_screenshot():
+    try:
+        hostname = request.form.get('hostname')
+        file = request.files.get('screenshot')
+        
+        if hostname and file:
+            # Salva a foto na pasta static do seu painel para o HTML carregar
+            caminho_dir = os.path.join('static', 'screenshots')
+            os.makedirs(caminho_dir, exist_ok=True)
+            
+            caminho_foto = os.path.join(caminho_dir, f"{hostname}.jpg")
+            file.save(caminho_foto)
+            return jsonify({"status": "sucesso"}), 200
+            
+        return jsonify({"status": "erro", "message": "Dados incompletos"}), 400
+    except Exception as e:
+        print(f"Erro na API de Screenshot: {e}")
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+
+@app.route('/api/command', methods=['POST'])
+def api_processar_comando():
+    try:
+        dados = request.get_json()
+        hostname = dados.get('hostname')
+        resultado_anterior = dados.get('result', '')
+        
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # Alteração preventiva: cria colunas de comando se não existirem na tabela dispositivos
+        try:
+            cursor.execute("ALTER TABLE dispositivos ADD COLUMN log_comando TEXT")
+            cursor.execute("ALTER TABLE dispositivos ADD COLUMN comando_pendente TEXT")
+        except Exception:
+            pass # As colunas já existem
+
+        # 1. Se o agente mandou a resposta de um comando anterior, salva no banco
+        if resultado_anterior:
+            cursor.execute("UPDATE dispositivos SET log_comando = ? WHERE hostname = ?", (resultado_anterior, hostname))
+            
+        # 2. Busca se você clicou em algum comando no painel web para enviar para esse PC
+        cursor.execute("SELECT comando_pendente FROM dispositivos WHERE hostname = ?", (hostname,))
+        row = cursor.fetchone()
+        
+        comando_para_executar = ""
+        if row and row[0]:
+            comando_para_executar = row[0]
+            # Limpa o comando do banco para ele não rodar repetidamente em loop
+            cursor.execute("UPDATE dispositivos SET comando_pendente = NULL WHERE hostname = ?", (hostname,))
+            
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"command": comando_para_executar}), 200
+    except Exception as e:
+        print(f"Erro na API de Comando: {e}")
+        return jsonify({"command": ""}), 500
+
+
 # =========================================
 # INICIALIZAÇÃO SEGURA DO ECOSSISTEMA
 # =========================================
