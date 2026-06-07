@@ -385,30 +385,31 @@ def api_processar_comando():
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        # Tenta pegar por 'username', se não achar tenta 'user', se não 'login'
-        username = request.form.get("username") or request.form.get("user") or request.form.get("login") or request.form.get("email")
-        # Tenta pegar por 'password', se não achar tenta 'senha'
+        username = request.form.get("username") or request.form.get("user") or request.form.get("login")
         password = request.form.get("password") or request.form.get("senha")
         
-        # Se mesmo assim vier vazio, avisa o Admin no log do que está acontecendo
         if not username or not password:
-            print(f"⚠️ FORMULÁRIO ENVIOU CAMPOS DESCONHECIDOS. Chaves recebidas: {list(request.form.keys())}")
-            flash("Erro interno no formulário de login!")
+            flash("Preencha todos os campos!")
             return render_template("login.html")
             
         username = username.strip()
         
         conn = connect_db()
+        conn.row_factory = sqlite3.Row  # 💡 O segredo: permite acessar user['password'] em vez de user[2]
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username=?", (username,))
         user = cursor.fetchone()
         conn.close()
 
-        # user[2] mapeia para o campo password no banco SQLite
-        if user and check_password_hash(user[2], password):
-            session["user"] = user[1] # Usa o username exato do banco
-            session["role"] = user[3]
-            return redirect(url_for("dashboard"))
+        if user:
+            # Converte para dicionário para garantir acesso seguro por chave
+            user_dict = dict(user)
+            
+            # Valida o hash buscando diretamente a chave 'password'
+            if check_password_hash(user_dict["password"], password):
+                session["user"] = user_dict["username"]
+                session["role"] = user_dict["role"]
+                return redirect(url_for("dashboard"))
             
         flash("Usuário ou senha inválidos!")
     return render_template("login.html")
