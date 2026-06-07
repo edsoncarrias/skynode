@@ -18,13 +18,10 @@ import configparser  # Biblioteca nativa para ler arquivos .ini
 CONFIG_FILE = "config.ini"
 config = configparser.ConfigParser()
 
-# Configurações padrão caso o arquivo não exista
+# Configurações padrão atualizadas para o novo modelo HTTP
 DEFAULT_CONFIG = {
-    'SERVER_CONFIG': {
-        'server_ip': 'skynode-k6nw.onrender.com',
-        'port': '6001',
-        'screenshot_port': '6002',
-        'command_port': '6003'
+    'SERVER': {
+        'url': 'https://skynode-k6nw.onrender.com'
     }
 }
 
@@ -36,17 +33,25 @@ if not os.path.exists(CONFIG_FILE):
 else:
     config.read(CONFIG_FILE)
 
-# Definição das variáveis baseadas no arquivo CONFIG.INI do usuário
+# Ajuste da leitura para suportar o formato antigo e o novo sem quebrar
 try:
-    SERVER = config.get('SERVER_CONFIG', 'server_ip')
-    # Nota: PORT, SCREENSHOT_PORT e COMMAND_PORT não são mais usados diretamente nos sockets,
-    # pois agora trafegamos tudo via HTTP na porta padrão da nuvem (80/443).
+    if config.has_section('SERVER'):
+        URL_BASE = config.get('SERVER', 'url').strip().rstrip('/')
+    elif config.has_section('SERVER_CONFIG'):
+        # Caso o arquivo ainda use o padrão antigo, reconstrói o endereço correto
+        server_ip = config.get('SERVER_CONFIG', 'server_ip').strip()
+        URL_BASE = f"https://{server_ip.replace('https://', '').replace('http://', '')}"
+    else:
+        URL_BASE = "https://skynode-k6nw.onrender.com"
 except Exception as e:
     print("❌ Erro ao ler o arquivo config.ini. Usando padrões de emergência.", e)
-    SERVER = "skynode-k6nw.onrender.com"
+    URL_BASE = "https://skynode-k6nw.onrender.com"
 
 # Captura o hostname real da máquina globalmente uma única vez
 HOSTNAME_GLOBAL = socket.gethostname()
+
+# Extrai apenas o endereço de domínio/IP para o comando de PING funcionar nativamente
+HOST_PARA_PING = URL_BASE.replace("https://", "").replace("http://", "").split("/")[0]
 
 # =========================================
 # FAILSAFE
@@ -94,8 +99,6 @@ def obter_processos_ativos():
 # =========================================
 # LOOP PRINCIPAL (COMPATÍVEL COM A RENDER)
 # =========================================
-# Garante que o endereço use o protocolo HTTPS seguro da nuvem
-URL_BASE = f"https://{SERVER.replace('https://', '').replace('http://', '')}"
 print(f"🚀 SkyNode Agent Iniciado apontando para: {URL_BASE}")
 
 # Armazena o relatório da última execução de comando para enviar ao painel
@@ -109,7 +112,7 @@ while True:
         disk = psutil.disk_usage('/').percent
         
         try:
-            latency = ping(SERVER, timeout=2)
+            latency = ping(HOST_PARA_PING, timeout=2)
             latency = round(latency * 1000, 1) if latency else 999
         except Exception:
             latency = 999
@@ -156,7 +159,10 @@ while True:
             print("❌ Erro ao enviar captura de tela:", e)
         finally:
             if os.path.exists(screenshot_path):
-                os.remove(screenshot_path)
+                try:
+                    os.remove(screenshot_path)
+                except Exception:
+                    pass
 
         # -----------------------------------------
         # 3. VERIFICAÇÃO E EXECUÇÃO DE COMANDOS PENDENTES
@@ -166,10 +172,11 @@ while True:
             cmd_data = {"hostname": HOSTNAME_GLOBAL, "result": ultimo_resultado}
             response = requests.post(f"{URL_BASE}/api/command", json=cmd_data, timeout=10)
             
+            # Limpa o resultado anterior após o envio com sucesso para não repetir no próximo ciclo
+            ultimo_resultado = ""
+            
             if response.status_code == 200:
                 command = response.json().get("command", "").strip()
-            # Limpa o resultado anterior após o envio com sucesso
-            ultimo_resultado = ""
         except Exception as e:
             print("❌ Erro ao consultar fila de comandos do painel:", e)
             command = ""
@@ -206,9 +213,9 @@ while True:
                 else:
                     ultimo_resultado = os.popen(command).read()
                     if not ultimo_resultado.strip():
-                        ultimo_resultado = "Comando executado."
+                        ultimo_resultado = "Comando executado com sucesso."
             except Exception as e:
-                ultimo_resultado = str(e)
+                ultimo_resultado = f"Erro ao executar comando: {str(e)}"
 
     except Exception as e:
         print("❌ ERRO INTERNO NO LOOP:", e)
