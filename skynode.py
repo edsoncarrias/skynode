@@ -968,24 +968,29 @@ def api_receber_status():
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
-@app.route('/api/screenshot', methods=['POST'])
+@app.route('/api/screenshot', methods=['GET', 'POST']) # Aceita ambos para evitar o erro 405
 def api_receber_screenshot():
+    if request.method == 'GET':
+        return jsonify({"status": "erro", "message": "Use POST para enviar imagens"}), 200
+
     try:
         hostname = request.form.get('hostname')
         file = request.files.get('screenshot')
         
         if hostname and file:
-            # Salva a foto na pasta static do seu painel para o HTML carregar
-            caminho_dir = os.path.join('static', 'screenshots')
+            # Garante que a pasta static/screenshots exista dentro do ambiente da Render
+            caminho_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
             os.makedirs(caminho_dir, exist_ok=True)
             
             caminho_foto = os.path.join(caminho_dir, f"{hostname}.jpg")
             file.save(caminho_foto)
+            print(f"📸 Screenshot recebida com sucesso de: {hostname}")
             return jsonify({"status": "sucesso"}), 200
             
+        print("⚠️ Dados de screenshot incompletos recebidos")
         return jsonify({"status": "erro", "message": "Dados incompletos"}), 400
     except Exception as e:
-        print(f"Erro na API de Screenshot: {e}")
+        print(f"❌ Erro na API de Screenshot: {e}")
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
