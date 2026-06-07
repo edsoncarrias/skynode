@@ -917,7 +917,9 @@ def handle_agent_data(payload):
 # CONTROLE VIA HTTP - ROTAS PARA O AGENTE DA RENDER
 # ==============================================================================
 
-@app.route('/api/status', methods=['POST'])
+# 1. ROTA DE STATUS MULTI-MÉTODO
+@app.route('/api/status', methods=['GET', 'POST'])
+@app.route('/api/status/', methods=['GET', 'POST']) # Aceita se o agente puser barra sem querer
 def api_receber_status():
     print("--- RECEBENDO REQUISIÇÃO DO AGENTE ---") # 👈 ADICIONE ESSA LINHA AQUI
     try:
@@ -968,7 +970,9 @@ def api_receber_status():
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
-@app.route('/api/screenshot', methods=['GET', 'POST']) # Aceita ambos para evitar o erro 405
+# 2. ROTA DE SCREENSHOT MULTI-MÉTODO
+@app.route('/api/screenshot', methods=['GET', 'POST'])
+@app.route('/api/screenshot/', methods=['GET', 'POST'])
 def api_receber_screenshot():
     if request.method == 'GET':
         return jsonify({"status": "erro", "message": "Use POST para enviar imagens"}), 200
@@ -994,7 +998,9 @@ def api_receber_screenshot():
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
-@app.route('/api/command', methods=['POST'])
+# 3. ROTA DE COMANDO MULTI-MÉTODO
+@app.route('/api/command', methods=['GET', 'POST'])
+@app.route('/api/command/', methods=['GET', 'POST'])
 def api_processar_comando():
     try:
         dados = request.get_json()
