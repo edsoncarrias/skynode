@@ -209,15 +209,19 @@ def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
+    # Cria a tabela garantindo que todas as colunas necessárias existam
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT NOT NULL,
-        email TEXT
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'tecnico',
+            email TEXT
+        )
     """)
+    
+    conn.commit()
+    conn.close()
     
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
@@ -701,13 +705,24 @@ def secret_reset_admin():
         conn = connect_db()
         cursor = conn.cursor()
         
-        # Deleta o admin antigo para não dar conflito de chave única
-        cursor.execute("DELETE FROM users WHERE username=?", ("admin",))
+        # Remove qualquer lixo ou duplicata que tenha ficado para trás
+        cursor.execute("DROP TABLE IF EXISTS users")
         
-        # Gera o hash novinho em folha da senha 'admin123'
+        # Recria a tabela limpinha
+        cursor.execute("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL,
+                email TEXT
+            )
+        """)
+        
+        # Gera o hash perfeito para a senha admin123
         nova_senha_hash = generate_password_hash("admin123")
         
-        # Insere o admin com a senha resetada
+        # Insere o administrador principal na ordem exata das colunas
         cursor.execute(
             "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)",
             ("admin", nova_senha_hash, "admin", "admin@skynode.com")
@@ -715,7 +730,7 @@ def secret_reset_admin():
         
         conn.commit()
         conn.close()
-        return "GATILHO EXECUTADO: O usuario 'admin' foi resetado para a senha 'admin123' com sucesso!", 200
+        return "SUCESSO: Banco de dados limpo e usuário 'admin' resetado para 'admin123'!", 200
     except Exception as e:
         return f"Erro ao resetar: {str(e)}", 500
     
