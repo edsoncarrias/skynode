@@ -381,11 +381,22 @@ def api_processar_comando():
 # =========================================
 # ROTAS FLASK (DASHBOARD E INTERFACE)
 # =========================================
+
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        # Tenta pegar por 'username', se não achar tenta 'user', se não 'login'
+        username = request.form.get("username") or request.form.get("user") or request.form.get("login") or request.form.get("email")
+        # Tenta pegar por 'password', se não achar tenta 'senha'
+        password = request.form.get("password") or request.form.get("senha")
+        
+        # Se mesmo assim vier vazio, avisa o Admin no log do que está acontecendo
+        if not username or not password:
+            print(f"⚠️ FORMULÁRIO ENVIOU CAMPOS DESCONHECIDOS. Chaves recebidas: {list(request.form.keys())}")
+            flash("Erro interno no formulário de login!")
+            return render_template("login.html")
+            
+        username = username.strip()
         
         conn = connect_db()
         cursor = conn.cursor()
@@ -393,10 +404,12 @@ def login():
         user = cursor.fetchone()
         conn.close()
 
+        # user[2] mapeia para o campo password no banco SQLite
         if user and check_password_hash(user[2], password):
-            session["user"] = username
+            session["user"] = user[1] # Usa o username exato do banco
             session["role"] = user[3]
             return redirect(url_for("dashboard"))
+            
         flash("Usuário ou senha inválidos!")
     return render_template("login.html")
 
@@ -699,7 +712,7 @@ def secret_reset_admin():
     except Exception as e:
         return f"Erro ao resetar: {str(e)}", 500
     
-    
+
 
 @app.route('/download-agent')
 def download_agent():
