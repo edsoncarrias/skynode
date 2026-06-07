@@ -919,6 +919,7 @@ def handle_agent_data(payload):
 
 @app.route('/api/status', methods=['POST'])
 def api_receber_status():
+    print("--- RECEBENDO REQUISIÇÃO DO AGENTE ---") # 👈 ADICIONE ESSA LINHA AQUI
     try:
         dados = request.get_json()
         if not dados:
