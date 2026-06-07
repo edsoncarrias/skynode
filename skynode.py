@@ -606,25 +606,36 @@ def add_user():
     if "user" not in session:
         return redirect(url_for("login"))
         
-    username = request.form.get('username')
+    # 💡 CORREÇÃO AQUI: Captura o usuário independente do nome do campo no HTML
+    username = request.form.get('username') or request.form.get('user') or request.form.get('login')
     email = request.form.get('email')
-    password = request.form.get('password')
+    password = request.form.get('password') or request.form.get('senha')
     role = request.form.get('role')
 
-    if username and password:
-        hashed_password = generate_password_hash(password)
-        conn = connect_db()
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
-                (username, email, hashed_password, role)
-            )
-            conn.commit()
-        except sqlite3.Error as e:
-            print(f"Erro crítico ao inserir no SQLite: {e}")
-        finally:
-            conn.close()
+    # Validação para evitar criar usuários sem nome ou em branco
+    if not username or not password:
+        flash("Erro: Usuário ou Senha não foram enviados corretamente pelo formulário!")
+        return redirect('/users')
+
+    username = username.strip()
+
+    hashed_password = generate_password_hash(password)
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+            (username, email, hashed_password, role)
+        )
+        conn.commit()
+        flash(f"Usuário {username} criado com sucesso!")
+    except sqlite3.IntegrityError:
+        flash("Erro: Esse nome de usuário já existe!")
+    except sqlite3.Error as e:
+        print(f"Erro crítico ao inserir no SQLite: {e}")
+    finally:
+        conn.close()
+        
     return redirect('/users')
 
 @app.route('/delete_user/<username>')
