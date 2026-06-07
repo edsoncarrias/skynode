@@ -602,7 +602,7 @@ def lista_usuarios():
     return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
 
     @app.route('/add_user', methods=['POST'])
-def add_user():
+    def add_user():
     if "user" not in session:
         return redirect(url_for("login"))
         
