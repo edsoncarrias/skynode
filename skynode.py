@@ -675,6 +675,32 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.route("/secret-reset-admin")
+def secret_reset_admin():
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # Deleta o admin antigo para não dar conflito de chave única
+        cursor.execute("DELETE FROM users WHERE username=?", ("admin",))
+        
+        # Gera o hash novinho em folha da senha 'admin123'
+        nova_senha_hash = generate_password_hash("admin123")
+        
+        # Insere o admin com a senha resetada
+        cursor.execute(
+            "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)",
+            ("admin", nova_senha_hash, "admin", "admin@skynode.com")
+        )
+        
+        conn.commit()
+        conn.close()
+        return "GATILHO EXECUTADO: O usuario 'admin' foi resetado para a senha 'admin123' com sucesso!", 200
+    except Exception as e:
+        return f"Erro ao resetar: {str(e)}", 500
+    
+    
+
 @app.route('/download-agent')
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
