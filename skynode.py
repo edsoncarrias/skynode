@@ -601,16 +601,14 @@ def lista_usuarios():
         })
     return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
 
-    @app.route('/add_user', methods=['POST'])
-    def add_user():
+@app.route('/add_user', methods=['POST'])
+def add_user():
     if "user" not in session:
         return redirect(url_for("login"))
         
     username = request.form.get('username') or request.form.get('user')
     email = request.form.get('email')
     password = request.form.get('password') or request.form.get('senha')
-    
-    # 💡 AJUSTE DE SEGURANÇA: Lê 'role' ou define o padrão como 'tecnico' se vier vazio
     role = request.form.get('role') or 'tecnico'
 
     if not username or not password:
@@ -623,33 +621,13 @@ def lista_usuarios():
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        # 💡 MUITO IMPORTANTE: Verifique se a ordem das colunas bate exatamente com o seu banco SQLite
         cursor.execute(
             "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
             (username, email, hashed_password, role)
         )
         conn.commit()
     except Exception as e:
-        print(f"Erro ao inserir usuário: {e}")
-    finally:
-        conn.close()
-        
-    return redirect('/users')
-
-    hashed_password = generate_password_hash(password)
-    conn = connect_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
-            (username, email, hashed_password, role)
-        )
-        conn.commit()
-        flash(f"Usuário {username} criado com sucesso!")
-    except sqlite3.IntegrityError:
-        flash("Erro: Esse nome de usuário já existe!")
-    except sqlite3.Error as e:
-        print(f"Erro crítico ao inserir no SQLite: {e}")
+        print(f"Erro ao inserir usuario: {e}")
     finally:
         conn.close()
         
