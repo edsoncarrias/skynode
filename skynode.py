@@ -917,22 +917,21 @@ def handle_agent_data(payload):
 # CONTROLE VIA HTTP - ROTAS PARA O AGENTE DA RENDER
 # ==============================================================================
 
-# 1. ROTA DE STATUS MULTI-MÉTODO
-@app.route('/api/status', methods=['GET', 'POST'])
-@app.route('/api/status/', methods=['GET', 'POST']) # Aceita se o agente puser barra sem querer
+@app.route('/api/status', methods=['POST'])
 def api_receber_status():
-    print("--- RECEBENDO REQUISIÇÃO DO AGENTE ---") # 👈 ADICIONE ESSA LINHA AQUI
     try:
         dados = request.get_json(force=True, silent=True)
         if not dados:
-            return jsonify({"status": "erro", "message": "Sem dados"}), 400
+            return jsonify({"status": "erro", "message": "Sem dados válidos"}), 400
             
         hostname = dados.get('hostname')
-        
+        if not hostname:
+            return jsonify({"status": "erro", "message": "Hostname ausente"}), 400
+            
         conn = connect_db()
         cursor = conn.cursor()
         
-        # Garante que a tabela exista no SQLite
+        # Criação da tabela garantindo compatibilidade com os campos enviados pelo agente
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS dispositivos (
                 hostname TEXT PRIMARY KEY,
@@ -947,7 +946,7 @@ def api_receber_status():
             )
         ''')
         
-        # Atualiza ou Insere o status do PC
+        # Execução de inserção limpa
         cursor.execute('''
             INSERT INTO dispositivos (hostname, system, cpu, ram, disk, ping, local_ip, public_ip, last_seen)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -961,12 +960,15 @@ def api_receber_status():
                 public_ip=excluded.public_ip,
                 last_seen=CURRENT_TIMESTAMP
         ''')
+        
         conn.commit()
         conn.close()
         
+        print(f" Sincronização realizada para: {hostname}")
         return jsonify({"status": "sucesso"}), 200
+        
     except Exception as e:
-        print(f"Erro na API de Status: {e}")
+        print(f" Erro ao gravar dados no SQLite: {e}")
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
