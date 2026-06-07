@@ -601,23 +601,40 @@ def lista_usuarios():
         })
     return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
 
-@app.route('/add_user', methods=['POST'])
+    @app.route('/add_user', methods=['POST'])
 def add_user():
     if "user" not in session:
         return redirect(url_for("login"))
         
-    # 💡 CORREÇÃO AQUI: Captura o usuário independente do nome do campo no HTML
-    username = request.form.get('username') or request.form.get('user') or request.form.get('login')
+    username = request.form.get('username') or request.form.get('user')
     email = request.form.get('email')
     password = request.form.get('password') or request.form.get('senha')
-    role = request.form.get('role')
+    
+    # 💡 AJUSTE DE SEGURANÇA: Lê 'role' ou define o padrão como 'tecnico' se vier vazio
+    role = request.form.get('role') or 'tecnico'
 
-    # Validação para evitar criar usuários sem nome ou em branco
     if not username or not password:
-        flash("Erro: Usuário ou Senha não foram enviados corretamente pelo formulário!")
+        flash("Erro: Campos obrigatórios ausentes!")
         return redirect('/users')
 
     username = username.strip()
+    hashed_password = generate_password_hash(password)
+    
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        # 💡 MUITO IMPORTANTE: Verifique se a ordem das colunas bate exatamente com o seu banco SQLite
+        cursor.execute(
+            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+            (username, email, hashed_password, role)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Erro ao inserir usuário: {e}")
+    finally:
+        conn.close()
+        
+    return redirect('/users')
 
     hashed_password = generate_password_hash(password)
     conn = connect_db()

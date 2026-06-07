@@ -49,19 +49,19 @@
         <div class="card card-custom">
             <h5 class="mb-3 text-success">➕ Cadastrar Novo Técnico</h5>
             
-            <form action="/add_user" method="POST" autocomplete="off" id="formCadastro">
+            <form action="/add_user" method="POST" autocomplete="new-password" id="formCadastro">
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Usuário (Login)</label>
-                        <input type="text" name="username" class="form-control" placeholder="ex: joao_silva" required>
+                        <input type="text" name="username" class="form-control" placeholder="ex: joao_silva" autocomplete="new-password" required>
                     </div>
                     <div class="col-md-4 mb-3">
                         <label class="form-label">E-mail</label>
-                        <input type="email" name="email" class="form-control" placeholder="ex: joao@empresa.com" required>
+                        <input type="email" name="email" class="form-control" placeholder="ex: joao@empresa.com" autocomplete="new-password" required>
                     </div>
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Senha Inicial</label>
-                        <input type="password" name="password" class="form-control" required>
+                        <input type="password" name="password" class="form-control" autocomplete="new-password" required>
                     </div>
                     <div class="col-md-2 mb-3">
                         <label class="form-label">Nível (Role)</label>
@@ -109,11 +109,17 @@
     </div>
 
     <script>
-        window.addEventListener('DOMContentLoaded', () => {
-            const form = document.getElementById('formCadastro');
-            if (form) {
-                form.reset(); // Zera todos os inputs do formulário
-            }
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const form = document.getElementById('formCadastro');
+                if (form) {
+                    form.reset();
+                    // Força os inputs a ficarem limpos explicitamente
+                    document.getElementsByName('username')[0].value = '';
+                    document.getElementsByName('email')[0].value = '';
+                    document.getElementsByName('password')[0].value = '';
+                }
+            }, 100);
         });
     </script>
 
