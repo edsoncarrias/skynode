@@ -390,12 +390,13 @@ def execute_ai_command():
 
   # Garanta que este import está no topo do arquivo junto com os outros
 
-@app.route("/api/metrics/<hostname>")  # Ou o nome exato da sua rota de métricas do mapa
+@app.route("/api/metrics/<hostname>")
 def obter_metricas_dispositivo(hostname):
     try:
         conn = connect_db()
-        # 💡 O PULO DO GATO: DictCursor faz o MariaDB retornar os nomes das colunas (ex: "cpu": 3.7)
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        # 💡 O NOVO PULO DO GATO: No SQLite, usamos o row_factory para retornar como dicionário
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         
         cursor.execute("""
             SELECT cpu, ram, disk, ping, created_at 
