@@ -10,6 +10,7 @@ import platform
 import threading
 import requests
 import subprocess
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 # Flask e suas extensões reunidos em blocos únicos
@@ -85,12 +86,13 @@ def ai_analyze_alert(message):
 
 # =========================================
 # TELEGRAM CONFIG
-# AGORA O CÓDIGO BUSCA DO SISTEMA, SEM EXPOR NADA NO GITHUB!
 # =========================================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_telegram_alert(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
@@ -117,7 +119,7 @@ socketio = SocketIO(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
 DATABASE = os.path.join(DATABASE_FOLDER, "skynode.db")
-SCREENSHOT_FOLDER = os.path.join(BASE_DIR, "screenshots")
+SCREENSHOT_FOLDER = os.path.join(BASE_DIR, "static", "screenshots")
 
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 os.makedirs(SCREENSHOT_FOLDER, exist_ok=True)
@@ -162,12 +164,15 @@ def add_alert(hostname, message):
 
 def check_alerts(device):
     hostname = device.get("hostname", "unknown")
-    cpu = float(device.get("cpu", 0))
-    ram = float(device.get("ram", 0))
-    disk = float(device.get("disk", 0))
-    ping = float(device.get("ping", 0))
+    try:
+        cpu = float(device.get("cpu", 0))
+        ram = float(device.get("ram", 0))
+        disk = float(device.get("disk", 0))
+        ping = float(device.get("ping", 0))
+    except:
+        return
+        
     status = get_device_status(device)
-
     now = time.time()
     cooldown = 300  
 
@@ -197,15 +202,13 @@ def check_alerts(device):
 # BANCO DE DADOS (CENTRALIZADO - SQLITE CORRIGIDO)
 # =========================================
 def connect_db():
-    # Cria e conecta ao arquivo de banco de dados local na Render
-    conn = sqlite3.connect('skynode.db', check_same_thread=False)
+    conn = sqlite3.connect(DATABASE, check_same_thread=False)
     return conn
 
 def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
-    # 1. Cria a tabela de usuários adaptada para SQLite (AUTOINCREMENT)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,16 +219,12 @@ def create_database():
     )
     """)
     
-    # 2. Tentativa de adicionar a coluna email caso a tabela já exista
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
         conn.commit()
-        print("🎉 Coluna 'email' adicionada com sucesso à tabela existente!")
     except Exception:
-        # No SQLite, se a coluna já existir, ele gera um erro que podemos ignorar
         pass
 
-    # 3. Cria a tabela de métricas adaptada para SQLite
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -238,7 +237,6 @@ def create_database():
     )
     """)
 
-    # 4. Cria a tabela de dispositivos adaptada para SQLite
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS dispositivos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -248,7 +246,6 @@ def create_database():
     )
     """)
     
-    # 5. Criação do Admin padrão adaptada para a sintaxe do SQLite (?)
     cursor.execute("SELECT * FROM users WHERE username=?", ("admin",))
     if not cursor.fetchone():
         admin_password = generate_password_hash("admin123")
@@ -263,30 +260,6 @@ def save_metrics(device):
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        # No SQLite usamos '?' em vez de '?'
-        cursor.execute("""
-        INSERT INTO metrics (hostname, cpu, ram, disk, ping)
-        VALUES (?, ?, ?, ?, ?)
-        """, (
-            device.get("hostname"),
-            device.get("cpu", 0),
-            device.get("ram", 0),
-            device.get("disk", 0),
-            device.get("ping", 0)
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print("❌ Erro save metrics:", e)
-
-# Executa inicialização única
-create_database()
-
-def save_metrics(device):
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-        # --- ALTERADO DE '?' PARA '?' ---
         cursor.execute("""
         INSERT INTO metrics (hostname, cpu, ram, disk, ping)
         VALUES (?, ?, ?, ?, ?)
@@ -328,8 +301,85 @@ def serialize_devices():
         })
     return updated_devices
 
+# ====================================================================
+# 🚨 NOVAS ROTAS HTTP COMPLETAS PARA TRATAR O FORMATO DO AGENTE (ANTI-405)
+# ====================================================================
+
+@app.route("/api/status", methods=["GET", "POST"])
+@app.route("/api/status/", methods=["GET", "POST"])
+def api_receber_status():
+    if request.method == "GET":
+        return jsonify({"status": "sucesso", "message": "API operacional. Use POST para enviar dados."}), 200
+        
+    try:
+        dados = request.get_json(force=True, silent=True)
+        if not dados:
+            return jsonify({"status": "erro", "message": "Sem dados ou JSON inválido"}), 400
+            
+        hostname = dados.get("hostname")
+        if not hostname:
+            return jsonify({"status": "erro", "message": "Hostname ausente"}), 400
+            
+        dados["last_seen"] = time.time()
+        dados["ip"] = request.remote_addr
+        dados["status"] = "online"
+        
+        global devices
+        devices = [d for d in devices if d.get("hostname") != hostname]
+        devices.append(dados)
+        
+        save_metrics(dados)
+        check_alerts(dados)
+        
+        socketio.emit("devices_update", serialize_devices())
+        return jsonify({"status": "sucesso"}), 200
+    except Exception as e:
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+@app.route("/api/screenshot", methods=["GET", "POST"])
+@app.route("/api/screenshot/", methods=["GET", "POST"])
+def api_receber_screenshot():
+    if request.method == "GET":
+        return jsonify({"status": "erro", "message": "Use POST para upload de arquivos"}), 200
+        
+    try:
+        hostname = request.form.get("hostname")
+        file = request.files.get("screenshot")
+        
+        if hostname and file:
+            caminho_foto = os.path.join(SCREENSHOT_FOLDER, f"{hostname}.png")
+            file.save(caminho_foto)
+            return jsonify({"status": "sucesso"}), 200
+            
+        return jsonify({"status": "erro", "message": "Dados ou arquivos incompletos"}), 400
+    except Exception as e:
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+@app.route("/api/command", methods=["GET", "POST"])
+@app.route("/api/command/", methods=["GET", "POST"])
+def api_processar_comando():
+    try:
+        dados = request.get_json(force=True, silent=True)
+        hostname = dados.get("hostname") if dados else request.args.get("hostname")
+        
+        if not hostname:
+            return jsonify({"command": "echo 'Sem hostname'"}), 200
+            
+        # Verifica se há resultado de comando executado vindo do agente
+        if dados and "output" in dados:
+            terminal_results[hostname] = dados.get("output")
+            
+        command = commands.get(hostname, "")
+        if command:
+            commands[hostname] = "" # Limpa após entregar
+            return jsonify({"command": command}), 200
+            
+        return jsonify({"command": "echo online"}), 200
+    except Exception as e:
+        return jsonify({"command": f"echo 'Erro no servidor: {str(e)}'"}), 200
+
 # =========================================
-# ROTAS FLASK (HTTP/API)
+# ROTAS FLASK (DASHBOARD E INTERFACE)
 # =========================================
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -343,7 +393,6 @@ def login():
         user = cursor.fetchone()
         conn.close()
 
-        # user[2] mapeia para o campo password
         if user and check_password_hash(user[2], password):
             session["user"] = username
             session["role"] = user[3]
@@ -388,20 +437,17 @@ def execute_ai_command():
         "command": command_to_run
     })
 
-  # Garanta que este import está no topo do arquivo junto com os outros
-
 @app.route("/api/metrics/<hostname>")
 def obter_metricas_dispositivo(hostname):
     try:
         conn = connect_db()
-        # 💡 O NOVO PULO DO GATO: No SQLite, usamos o row_factory para retornar como dicionário
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         cursor.execute("""
             SELECT cpu, ram, disk, ping, created_at 
             FROM metrics 
-            WHERE hostname =? 
+            WHERE hostname = ? 
             ORDER BY id DESC LIMIT 1
         """, (hostname,))
         
@@ -409,13 +455,18 @@ def obter_metricas_dispositivo(hostname):
         conn.close()
         
         if dado:
-            # Converte a data para string para o JSON não quebrar
-            if 'created_at' in dado and dado['created_at']:
-                dado['created_at'] = dado['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-            return jsonify(dado)
+            # 💡 FIX SEGURO CONTRA CRASH: Converte o Row em dicionário manipulável do Python
+            dado_dict = dict(dado)
+            if dado_dict.get('created_at'):
+                try:
+                    # Se vier como String do banco, valida o tipo antes de tratar
+                    if isinstance(dado_dict['created_at'], str):
+                        pass 
+                except:
+                    dado_dict['created_at'] = str(dado_dict['created_at'])
+            return jsonify(dado_dict)
             
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0})
-        
     except Exception as e:
         print(f"❌ Erro ao buscar métricas para o card: {e}")
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0}), 500
@@ -491,12 +542,8 @@ def remote(hostname):
     if os.path.exists(rustdesk_path):
         try:
             subprocess.Popen(["cmd.exe", "/c", "start", "", rustdesk_path, ip])
-            print(f"🖥 Abrindo RustDesk com segurança para {ip}")
         except Exception as e:
             print("❌ Erro RustDesk:", e)
-    else:
-        print("❌ RustDesk não encontrado no caminho especificado.")
-
     return redirect(url_for("device_details", hostname=hostname))
 
 @app.route("/send_command/<hostname>/<command>")
@@ -538,7 +585,6 @@ def lista_usuarios():
             "email": u["email"],
             "role": u["role"]
         })
-
     return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
 
 @app.route('/add_user', methods=['POST'])
@@ -552,7 +598,6 @@ def add_user():
     role = request.form.get('role')
 
     if username and password:
-        # Criptografa a senha para manter a compatibilidade com o sistema de login
         hashed_password = generate_password_hash(password)
         conn = connect_db()
         cursor = conn.cursor()
@@ -562,7 +607,6 @@ def add_user():
                 (username, email, hashed_password, role)
             )
             conn.commit()
-            print(f"👤 Usuário '{username}' cadastrado com sucesso!")
         except sqlite3.Error as e:
             print(f"Erro crítico ao inserir no SQLite: {e}")
         finally:
@@ -631,39 +675,31 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ... (mantenha o restante do seu código Flask)
-
 @app.route('/download-agent')
 def download_agent():
-    # 1. Descobre o caminho da pasta 'downloads' na raiz do projeto
     base_dir = os.path.dirname(os.path.abspath(__file__))
     downloads_path = os.path.join(base_dir, 'downloads')
     
-    # Caminho completo dos dois arquivos
     agent_path = os.path.join(downloads_path, 'agent.exe')
     config_path = os.path.join(downloads_path, 'config.ini')
     
-    # 2. Verifica se a pasta ou os arquivos estão faltando no servidor
     if not os.path.exists(agent_path) or not os.path.exists(config_path):
-        # Se falhar, ele mostra o que o servidor realmente tem na pasta para sabermos o motivo
         arquivos_reais = os.listdir(downloads_path) if os.path.exists(downloads_path) else "Pasta nao existe"
         return f"Erro: Arquivos nao encontrados. Conteudo da pasta: {arquivos_reais}", 500
 
-    # 3. Cria o ZIP na memória incluindo os dois arquivos existentes
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(agent_path, 'agent.exe')
         zipf.write(config_path, 'config.ini')
             
     memory_file.seek(0)
-    
-    # 4. Envia o ZIP pronto para o usuário
     return send_file(
         memory_file,
         mimetype='application/zip',
         as_attachment=True,
         download_name='SkyNode_Agent.zip'
     )
+
 @app.route("/mapa")
 def pagina_mapa():
     if "user" not in session:
@@ -678,7 +714,7 @@ def api_mapa_dados():
     dispositivos_cadastrados = []
     try:
         conn = connect_db()
-        cursor = conn.cursor() # PyMySQL não usa row_factory
+        cursor = conn.cursor()
         cursor.execute("SELECT hostname, ip, status FROM dispositivos")
         for linha in cursor.fetchall():
             dispositivos_cadastrados.append({
@@ -743,54 +779,19 @@ def api_adicionar_descoberto():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ====================================================================
-# ROTAS DE NAVEGAÇÃO DOS MENUS (CORRIGIDO PROTEÇÃO DE SESSÃO)
-# ====================================================================
-# ====================================================================
-# ROTA INTELIGENTE ANTIBUG (DIAGNÓSTICO AUTOMÁTICO DE ARQUIVOS)
-# ====================================================================
 @app.route('/<pagina>')
 def carregar_pagina_coringa(pagina):
     if "user" not in session:
         return redirect(url_for("login"))
 
-    paginas_menu = ['dispositivos', 'dispositivo', 'monitoramento', 'configuracoes', 'configuracao']
-    
+    paginas_menu = ['dispositivos', 'dispositivo', 'monitoramento', 'configuracoes', 'configuracao', 'mapa']
     if pagina in paginas_menu:
         pasta_templates = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-        
         if os.path.exists(pasta_templates):
             arquivos_reais = os.listdir(pasta_templates)
-            
             if f"{pagina}.html" in arquivos_reais:
                 return render_template(f"{pagina}.html", user=session["user"], role=session["role"], devices=serialize_devices())
-            
-            if pagina == 'dispositivos' and 'dispositivo.html' in arquivos_reais:
-                return render_template('dispositivo.html', user=session["user"], role=session["role"], devices=serialize_devices())
-            if pagina == 'configuracoes' and 'configuracao.html' in arquivos_reais:
-                return render_template('configuracao.html', user=session["user"], role=session["role"])
-                
-            if pagina == 'dispositivo' and 'dispositivos.html' in arquivos_reais:
-                return render_template('dispositivos.html', user=session["user"], role=session["role"], devices=serialize_devices())
-            if pagina == 'configuracao' and 'configuracoes.html' in arquivos_reais:
-                return render_template('configuracoes.html', user=session["user"], role=session["role"])
-
-            print(f"⚠️ Erro de Arquivo: O navegador pediu '/{pagina}', mas o arquivo correspondente não existe.")
-            return f"""
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h2 style="color: red;">🚨 Arquivo HTML Não Encontrado!</h2>
-                <p>O Flask tentou abrir a tela do menu, mas ela não existe na pasta <b>templates</b>.</p>
-                <p><b>O que foi solicitado:</b> {pagina}.html</p>
-                <hr>
-                <h3>📋 Arquivos detectados na sua pasta 'templates':</h3>
-                <ul>
-                    {"".join([f"<li>{arq}</li>" for arq in arquivos_reais if arq.endswith('.html')])}
-                </ul>
-            </div>
-            """, 404
-
     return "Rota não mapeada no menu", 404
-
 
 @app.route("/api/processos/<hostname>", methods=["GET"])
 def api_processos(hostname):
@@ -805,10 +806,8 @@ def api_processos(hostname):
         if terminal_results.get(hostname):
             break
         time.sleep(0.5)
-        
     return jsonify({"processos": terminal_results.get(hostname, "Sem resposta do agente")})
 
-# 🛡️ LIMPEZA DE CACHE DINÂMICO CONTRA ERROS 404 RESIDUAIS
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -817,246 +816,9 @@ def add_header(response):
     return response
 
 # =========================================
-# SERVIDORES TCP (SOCKETS DE AGENTES)
-# =========================================
-def socket_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", 6001))
-    server.listen(100)
-    print("✅ Socket de métricas na porta 6001")
-
-    while True:
-        try:
-            client, addr = server.accept()
-            data = client.recv(4096).decode()
-            if not data:
-                client.close()
-                continue
-
-            device = json.loads(data)
-            device["ip"] = addr[0]
-            device["last_seen"] = time.time()
-            device["status"] = "online"
-
-            global devices
-            devices = [d for d in devices if d.get("hostname") != device.get("hostname")]
-            devices.append(device)
-
-            save_metrics(device)
-            check_alerts(device)
-
-            socketio.emit("devices_update", serialize_devices())
-            client.close()
-        except Exception as e:
-            print("❌ Erro socket métricas:", e)
-
-def screenshot_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", 6002))
-    server.listen(20)
-    print("✅ Socket de screenshot na porta 6002")
-
-    while True:
-        try:
-            client, _ = server.accept()
-            hostname_size = int.from_bytes(client.recv(4), "big")
-            hostname = client.recv(hostname_size).decode()
-            filename = os.path.join(SCREENSHOT_FOLDER, f"{hostname}.png")
-
-            with open(filename, "wb") as file:
-                while True:
-                    data = client.recv(4096)
-                    if not data:
-                        break
-                    file.write(data)
-            client.close()
-        except Exception as e:
-            print("❌ Erro socket screenshot:", e)
-
-def command_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", 6003))
-    server.listen(50)
-    print("✅ Socket de comandos na porta 6003")
-
-    while True:
-        try:
-            client, _ = server.accept()
-            client.settimeout(15)
-            hostname = client.recv(4096).decode().strip()
-
-            command = commands.get(hostname, "")
-            if not command:
-                command = "echo online"
-
-            client.sendall(command.encode())
-            result = client.recv(65535).decode(errors="ignore")
-            terminal_results[hostname] = result
-            commands[hostname] = ""
-            client.close()
-        except Exception as e:
-            print("❌ Erro socket comandos:", e)
-
-def monitor_devices():
-    while True:
-        try:
-            socketio.emit("devices_update", serialize_devices())
-            time.sleep(3)
-        except Exception as e:
-            print("❌ Erro loop monitor:", e)
-
-@socketio.on('atualizar_status')
-def handle_agent_data(payload):
-    dados = json.loads(payload) if isinstance(payload, str) else payload
-    verificar_limites_RMM(dados)
-
-# ==============================================================================
-# CONTROLE VIA HTTP - ROTAS PARA O AGENTE DA RENDER
-# ==============================================================================
-
-@app.route('/api/status', methods=['POST'])
-def api_receber_status():
-    try:
-        dados = request.get_json(force=True, silent=True)
-        if not dados:
-            return jsonify({"status": "erro", "message": "Sem dados válidos"}), 400
-            
-        hostname = dados.get('hostname')
-        if not hostname:
-            return jsonify({"status": "erro", "message": "Hostname ausente"}), 400
-            
-        conn = connect_db()
-        cursor = conn.cursor()
-        
-        # Criação da tabela garantindo compatibilidade com os campos enviados pelo agente
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS dispositivos (
-                hostname TEXT PRIMARY KEY,
-                system TEXT,
-                cpu REAL,
-                ram REAL,
-                disk REAL,
-                ping REAL,
-                local_ip TEXT,
-                public_ip TEXT,
-                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Execução de inserção limpa
-        cursor.execute('''
-            INSERT INTO dispositivos (hostname, system, cpu, ram, disk, ping, local_ip, public_ip, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(hostname) DO UPDATE SET
-                system=excluded.system,
-                cpu=excluded.cpu,
-                ram=excluded.ram,
-                disk=excluded.disk,
-                ping=excluded.ping,
-                local_ip=excluded.local_ip,
-                public_ip=excluded.public_ip,
-                last_seen=CURRENT_TIMESTAMP
-        ''')
-        
-        conn.commit()
-        conn.close()
-        
-        print(f" Sincronização realizada para: {hostname}")
-        return jsonify({"status": "sucesso"}), 200
-        
-    except Exception as e:
-        print(f" Erro ao gravar dados no SQLite: {e}")
-        return jsonify({"status": "erro", "message": str(e)}), 500
-
-
-# 2. ROTA DE SCREENSHOT MULTI-MÉTODO
-@app.route('/api/screenshot', methods=['GET', 'POST'])
-def api_receber_screenshot():
-    if request.method == 'GET':
-        return jsonify({"status": "erro", "message": "Método GET não aceito aqui."}), 200
-
-    try:
-        hostname = request.form.get('hostname')
-        file = request.files.get('screenshot')
-        
-        if hostname and file:
-            # Garante o caminho correto da pasta static/screenshots dentro do servidor Linux da Render
-            caminho_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
-            os.makedirs(caminho_dir, exist_ok=True)
-            
-            caminho_foto = os.path.join(caminho_dir, f"{hostname}.jpg")
-            file.save(caminho_foto)
-            return jsonify({"status": "sucesso"}), 200
-            
-        return jsonify({"status": "erro", "message": "Dados incompletos"}), 400
-    except Exception as e:
-        print(f"Erro na API de Screenshot: {e}")
-        return jsonify({"status": "erro", "message": str(e)}), 500
-
-
-# 3. ROTA DE COMANDO MULTI-MÉTODO
-@app.route('/api/command', methods=['GET', 'POST'])
-@app.route('/api/command/', methods=['GET', 'POST'])
-def api_processar_comando():
-    try:
-        dados = request.get_json(force=True, silent=True)
-        hostname = dados.get('hostname')
-        resultado_anterior = dados.get('result', '')
-        
-        conn = connect_db()
-        cursor = conn.cursor()
-        
-        # Alteração preventiva: cria colunas de comando se não existirem na tabela dispositivos
-        try:
-            cursor.execute("ALTER TABLE dispositivos ADD COLUMN log_comando TEXT")
-            cursor.execute("ALTER TABLE dispositivos ADD COLUMN comando_pendente TEXT")
-        except Exception:
-            pass # As colunas já existem
-
-        # 1. Se o agente mandou a resposta de um comando anterior, salva no banco
-        if resultado_anterior:
-            cursor.execute("UPDATE dispositivos SET log_comando = ? WHERE hostname = ?", (resultado_anterior, hostname))
-            
-        # 2. Busca se você clicou em algum comando no painel web para enviar para esse PC
-        cursor.execute("SELECT comando_pendente FROM dispositivos WHERE hostname = ?", (hostname,))
-        row = cursor.fetchone()
-        
-        comando_para_executar = ""
-        if row and row[0]:
-            comando_para_executar = row[0]
-            # Limpa o comando do banco para ele não rodar repetidamente em loop
-            cursor.execute("UPDATE dispositivos SET comando_pendente = NULL WHERE hostname = ?", (hostname,))
-            
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"command": comando_para_executar}), 200
-    except Exception as e:
-        print(f"Erro na API de Comando: {e}")
-        return jsonify({"command": ""}), 500
-
-
-# =========================================
-# INICIALIZAÇÃO SEGURA DO ECOSSISTEMA
+# FUNÇÃO DE INICIALIZAÇÃO SEGURA DO APP
 # =========================================
 if __name__ == "__main__":
-    print("\n🔍 [SkyNode] Iniciando modo de diagnóstico seguro...")
-    try:
-        print("🚀 Ativando servidores de comunicação TCP...")
-        threading.Thread(target=socket_server, daemon=True).start()
-        threading.Thread(target=screenshot_server, daemon=True).start()
-        threading.Thread(target=command_server, daemon=True).start()
-        threading.Thread(target=monitor_devices, daemon=True).start()
-
-        print("🔥 Servidor Web online em: http://0.0.0.0:5000")
-        # Correção aplicada: adicionado allow_unsafe_werkzeug=True para rodar na Render
-        socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
-
-    except Exception as erro_fatal:
-        print("\n❌ --------------------------------------------------")
-        print(f"🚨 ERRO CRÍTICO NA INICIALIZAÇÃO: {erro_fatal}")
-        print("-------------------------------------------------- ❌\n")
-        # O input() foi removido daqui para evitar o erro EOFError no servidor automatizado
+    # Mantido em escopo local para evitar colisões com o gunicorn no ambiente da Render
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
