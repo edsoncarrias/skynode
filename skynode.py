@@ -923,7 +923,7 @@ def handle_agent_data(payload):
 def api_receber_status():
     print("--- RECEBENDO REQUISIÇÃO DO AGENTE ---") # 👈 ADICIONE ESSA LINHA AQUI
     try:
-        dados = request.get_json()
+        dados = request.get_json(force=True, silent=True)
         if not dados:
             return jsonify({"status": "erro", "message": "Sem dados"}), 400
             
@@ -1003,7 +1003,7 @@ def api_receber_screenshot():
 @app.route('/api/command/', methods=['GET', 'POST'])
 def api_processar_comando():
     try:
-        dados = request.get_json()
+        dados = request.get_json(force=True, silent=True)
         hostname = dados.get('hostname')
         resultado_anterior = dados.get('result', '')
         
