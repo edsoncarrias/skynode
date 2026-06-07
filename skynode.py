@@ -974,29 +974,26 @@ def api_receber_status():
 
 # 2. ROTA DE SCREENSHOT MULTI-MÉTODO
 @app.route('/api/screenshot', methods=['GET', 'POST'])
-@app.route('/api/screenshot/', methods=['GET', 'POST'])
 def api_receber_screenshot():
     if request.method == 'GET':
-        return jsonify({"status": "erro", "message": "Use POST para enviar imagens"}), 200
+        return jsonify({"status": "erro", "message": "Método GET não aceito aqui."}), 200
 
     try:
         hostname = request.form.get('hostname')
         file = request.files.get('screenshot')
         
         if hostname and file:
-            # Garante que a pasta static/screenshots exista dentro do ambiente da Render
+            # Garante o caminho correto da pasta static/screenshots dentro do servidor Linux da Render
             caminho_dir = os.path.join(os.path.dirname(__file__), 'static', 'screenshots')
             os.makedirs(caminho_dir, exist_ok=True)
             
             caminho_foto = os.path.join(caminho_dir, f"{hostname}.jpg")
             file.save(caminho_foto)
-            print(f"📸 Screenshot recebida com sucesso de: {hostname}")
             return jsonify({"status": "sucesso"}), 200
             
-        print("⚠️ Dados de screenshot incompletos recebidos")
         return jsonify({"status": "erro", "message": "Dados incompletos"}), 400
     except Exception as e:
-        print(f"❌ Erro na API de Screenshot: {e}")
+        print(f"Erro na API de Screenshot: {e}")
         return jsonify({"status": "erro", "message": str(e)}), 500
 
 
