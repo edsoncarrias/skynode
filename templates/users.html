@@ -48,7 +48,8 @@
 
         <div class="card card-custom">
             <h5 class="mb-3 text-success">➕ Cadastrar Novo Técnico</h5>
-            <form action="/add_user" method="POST">
+            
+            <form action="/add_user" method="POST" autocomplete="off" id="formCadastro">
                 <div class="row">
                     <div class="col-md-3 mb-3">
                         <label class="form-label">Usuário (Login)</label>
@@ -106,6 +107,15 @@
             </div>
         </div>
     </div>
+
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('formCadastro');
+            if (form) {
+                form.reset(); // Zera todos os inputs do formulário
+            }
+        });
+    </script>
 
 </body>
 </html>
