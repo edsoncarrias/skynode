@@ -809,7 +809,7 @@ def carregar_pagina_coringa(pagina):
     return "Rota não mapeada no menu", 404
 
 @app.route("/api/processos/<hostname>", methods=["GET"])
-def api_processas(hostname):
+def api_processos(hostname):
     if "user" not in session:
         return jsonify({"error": "unauthorized"}), 401
 
@@ -830,6 +830,5 @@ def add_header(response):
     response.headers["Expires"] = "0"
     return response
 
-# Garanta que o socketio.run esteja DENTRO desse bloco if
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
