@@ -17,9 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify, send_file, abort
 from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
-
-# Bibliotecas de IA
-import ollama
 from ping3 import ping
 
 # 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
@@ -43,47 +40,13 @@ def verificar_limites_RMM(dispositivo):
         print(f"\n🧠 [ALERTA ATENÇÃO] - O dispositivo '{hostname}' está com uso de RAM alto: {ram}%!\n")
 
 # =========================================
-# INTEGRAÇÃO OLLAMA (IA LOCAL + AUTO-FIX)
+# DIAGNÓSTICO DE ALERTAS (OLLAMA REMOVIDO)
 # =========================================
 def ai_analyze_alert(message):
-    try:
-        response = ollama.chat(
-            model='phi3',
-            messages=[
-                {
-                    "role": "system", 
-                    "content": (
-                        "Você é um analista SysAdmin e assistente automatizado do sistema RMM SkyNode. "
-                        "Explique tecnicamente este alerta de forma muito curta (máximo 2 frases). "
-                        "Depois, obrigatoriamente na ÚLTIMA LINHA, forneça um comando de terminal (Windows CMD) "
-                        "REAL e GENÉRICO que possa mitigar ou resolver o problema, sem inventar variáveis fictícias como 'xyz' ou 'nome_do_processo'. "
-                        "Se for CPU alta, sugira listar os processos que mais consomem ou limpar arquivos temporários. "
-                        "Formato estrito da última linha: COMMAND: seu_comando_aqui"
-                        "Exemplo de saída:\n"
-                        "O uso de disco está crítico devido a arquivos temporários acumulados.\n"
-                        "COMMAND: del /q /s %temp%\\*"
-                    )
-                },
-                {
-                    "role": "user", 
-                    "content": f"Analise este alerta do agente: {message}"
-                }
-            ]
-        )
-        full_text = response['message']['content']
-        explanation = []
-        suggested_command = "echo 'Nenhuma acao automatica definida'"
-        
-        for line in full_text.split('\n'):
-            if line.strip().startswith("COMMAND:"):
-                suggested_command = line.replace("COMMAND:", "").strip()
-            elif line.strip():
-                explanation.append(line.strip())
-                
-        return " ".join(explanation), suggested_command
-    except Exception as e:
-        print("❌ OLLAMA ERRO (Verifique se o Ollama está aberto):", e)
-        return "IA Local indisponível no momento.", "echo 'Erro na IA'"
+    # Retorno padrão limpo para manter a compatibilidade do sistema sem IA externa
+    explanation = f"Alerta detectado no sistema: {message}."
+    suggested_command = "echo 'Analise automatica desativada'"
+    return explanation, suggested_command
 
 # =========================================
 # TELEGRAM CONFIG
@@ -157,11 +120,10 @@ def add_alert(hostname, message):
         alerts.pop(0)
 
     print(f"🚨 Alerta: {alert_data['text']}")
-    print(f"🤖 IA LOCAL: {alert_data['ai_analysis']}")
-    print(f"🛠️ COMANDO SUGERIDO: {alert_data['ai_command']}")
+    print(f"🛠️ DIAGNÓSTICO: {alert_data['ai_analysis']}")
 
     socketio.emit("new_alert", alert_data)
-    send_telegram_alert(f"{alert_data['text']}\n\n🤖 IA Diagnóstico: {ai_explanation}")
+    send_telegram_alert(f"{alert_data['text']}\n\n🛠️ Diagnóstico: {ai_explanation}")
 
 def check_alerts(device):
     hostname = device.get("hostname", "unknown")
@@ -210,7 +172,6 @@ def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
-    # Cria a tabela garantindo que todas as colunas necessárias existam
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,7 +218,7 @@ def create_database():
     
     conn.commit()
     conn.close()
-    print("✅ Banco de dados SQLite inicializado com sucesso!")
+    print("✅ Banco de dados SQLite initialized successfully!")
 
 def save_metrics(device):
     try:
@@ -278,7 +239,6 @@ def save_metrics(device):
     except Exception as e:
         print("❌ Erro save metrics:", e)
 
-# Executa inicialização única
 create_database()
 
 # =========================================
@@ -305,7 +265,7 @@ def serialize_devices():
     return updated_devices
 
 # ====================================================================
-# 🚨 NOVAS ROTAS HTTP COMPLETAS PARA TRATAR O FORMATO DO AGENTE (ANTI-405)
+# ROTAS HTTP (APIs DO AGENTE)
 # ====================================================================
 
 @app.route("/api/status", methods=["GET", "POST"])
@@ -368,13 +328,12 @@ def api_processar_comando():
         if not hostname:
             return jsonify({"command": "echo 'Sem hostname'"}), 200
             
-        # Verifica se há resultado de comando executado vindo do agente
         if dados and "output" in dados:
             terminal_results[hostname] = dados.get("output")
             
         command = commands.get(hostname, "")
         if command:
-            commands[hostname] = "" # Limpa após entregar
+            commands[hostname] = ""
             return jsonify({"command": command}), 200
             
         return jsonify({"command": "echo online"}), 200
@@ -382,7 +341,7 @@ def api_processar_comando():
         return jsonify({"command": f"echo 'Erro no servidor: {str(e)}'"}), 200
 
 # =========================================
-# ROTAS FLASK (DASHBOARD E INTERFACE)
+# ROTAS FLASK (INTERFACE)
 # =========================================
 
 @app.route("/", methods=["GET", "POST"])
@@ -398,17 +357,14 @@ def login():
         username = username.strip()
         
         conn = connect_db()
-        conn.row_factory = sqlite3.Row  # 💡 O segredo: permite acessar user['password'] em vez de user[2]
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username=?", (username,))
         user = cursor.fetchone()
         conn.close()
 
         if user:
-            # Converte para dicionário para garantir acesso seguro por chave
             user_dict = dict(user)
-            
-            # Valida o hash buscando diretamente a chave 'password'
             if check_password_hash(user_dict["password"], password):
                 session["user"] = user_dict["username"]
                 session["role"] = user_dict["role"]
@@ -472,11 +428,9 @@ def obter_metricas_dispositivo(hostname):
         conn.close()
         
         if dado:
-            # 💡 FIX SEGURO CONTRA CRASH: Converte o Row em dicionário manipulável do Python
             dado_dict = dict(dado)
             if dado_dict.get('created_at'):
                 try:
-                    # Se vier como String do banco, valida o tipo antes de tratar
                     if isinstance(dado_dict['created_at'], str):
                         pass 
                 except:
@@ -485,7 +439,7 @@ def obter_metricas_dispositivo(hostname):
             
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0})
     except Exception as e:
-        print(f"❌ Erro ao buscar métricas para o card: {e}")
+        print(f"❌ Erro ao buscar métricas: {e}")
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0}), 500
 
 @app.route("/screenshots/<filename>")
@@ -537,11 +491,10 @@ def api_terminal(hostname):
     commands[hostname] = command
 
     timeout, start = 15, time.time()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        while time.time() - start < timeout:
-            if terminal_results.get(hostname):
-                break
-            time.sleep(0.5)
+    while time.time() - start < timeout:
+        if terminal_results.get(hostname):
+            break
+        time.sleep(0.5)
 
     return jsonify({"output": terminal_results.get(hostname, "Sem resposta do agente")})
 
@@ -704,11 +657,7 @@ def secret_reset_admin():
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        
-        # Remove qualquer lixo ou duplicata que tenha ficado para trás
         cursor.execute("DROP TABLE IF EXISTS users")
-        
-        # Recria a tabela limpinha
         cursor.execute("""
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -718,19 +667,14 @@ def secret_reset_admin():
                 email TEXT
             )
         """)
-        
-        # Gera o hash perfeito para a senha admin123
         nova_senha_hash = generate_password_hash("admin123")
-        
-        # Insere o administrador principal na ordem exata das colunas
         cursor.execute(
             "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)",
             ("admin", nova_senha_hash, "admin", "admin@skynode.com")
         )
-        
         conn.commit()
         conn.close()
-        return "SUCESSO: Banco de dados limpo e usuário 'admin' resetado para 'admin123'!", 200
+        return "SUCESSO: Usuário 'admin' resetado para 'admin123'!", 200
     except Exception as e:
         return f"Erro ao resetar: {str(e)}", 500
     
@@ -738,13 +682,12 @@ def secret_reset_admin():
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     downloads_path = os.path.join(base_dir, 'downloads')
-    
     agent_path = os.path.join(downloads_path, 'agent.exe')
     config_path = os.path.join(downloads_path, 'config.ini')
     
     if not os.path.exists(agent_path) or not os.path.exists(config_path):
         arquivos_reais = os.listdir(downloads_path) if os.path.exists(downloads_path) else "Pasta nao existe"
-        return f"Erro: Arquivos nao encontrados. Conteudo da pasta: {arquivos_reais}", 500
+        return f"Erro: Arquivos nao encontrados: {arquivos_reais}", 500
 
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -788,10 +731,8 @@ def api_mapa_dados():
 
     return jsonify({"dispositivos": dispositivos_cadastrados})
 
-# 💡 FUNÇÃO AUXILIAR ESSENCIAL PARA O THREAD POOL FUNCIONAR
 def checar_ip_individual(ip):
     try:
-        # Envia um único ping rápido (timeout curto de 200ms para não travar a linha)
         res = ping(ip, timeout=0.2)
         if res is not None and res is not False:
             return {"ip": ip, "hostname": f"Dispositivo {ip.split('.')[-1]}"}
@@ -808,13 +749,10 @@ def api_descoberta_scan():
     if not subrede:
         return jsonify({"error": "Sub-rede ausente"}), 400
 
-    # Se o usuário passar "192.168.1" ou "192.168.1.", remove o ponto final para evitar "192.168.1..1"
     subrede = subrede.rstrip('.')
-
     lista_ips = [f"{subrede}.{i}" for i in range(1, 255)]
     hosts_validos = []
 
-    # Executa a varredura ultra rápida com as 50 threads em paralelo
     with ThreadPoolExecutor(max_workers=50) as executor:
         resultados = executor.map(checar_ip_individual, lista_ips)
         for ip_respondido in resultados:
@@ -840,7 +778,6 @@ def api_adicionar_descoberto():
         conn = connect_db()
         cursor = conn.cursor()
         
-        # 💡 EVITA DUPLICADOS: Garante que o mesmo IP não seja adicionado duas vezes
         cursor.execute("SELECT id FROM dispositivos WHERE ip = ?", (ip,))
         if cursor.fetchone():
             return jsonify({"success": False, "error": "Este dispositivo já está cadastrado!"}), 400
@@ -854,7 +791,6 @@ def api_adicionar_descoberto():
     except Exception as e:
         return jsonify({"error": f"Erro no banco de dados: {str(e)}"}), 500
     finally:
-        # Garante que a conexão feche independente de ter dado erro ou sucesso
         if conn:
             conn.close()
 
@@ -873,7 +809,7 @@ def carregar_pagina_coringa(pagina):
     return "Rota não mapeada no menu", 404
 
 @app.route("/api/processos/<hostname>", methods=["GET"])
-def api_processos(hostname):
+def api_processas(hostname):
     if "user" not in session:
         return jsonify({"error": "unauthorized"}), 401
 
