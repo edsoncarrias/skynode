@@ -23,3 +23,5 @@ wsproto==1.3.2
 requests
 ollama
 pymysql
+ping3
+gunicorn
