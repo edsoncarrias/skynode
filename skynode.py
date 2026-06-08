@@ -20,6 +20,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # Bibliotecas de IA
 import ollama
+from ping3 import ping
 
 # 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
 LIMITE_CPU = 50.0  # Se a CPU passar de 50%, dispara
@@ -168,7 +169,7 @@ def check_alerts(device):
         cpu = float(device.get("cpu", 0))
         ram = float(device.get("ram", 0))
         disk = float(device.get("disk", 0))
-        ping = float(device.get("ping", 0))
+        ping_val = float(device.get("ping", 0))
     except:
         return
         
@@ -192,8 +193,8 @@ def check_alerts(device):
     if disk >= 90 and can_alert(f"{hostname}_disk"):
         add_alert(hostname, f"💽 Disco cheio: {disk}%")
 
-    if ping >= 150 and can_alert(f"{hostname}_ping"):
-        add_alert(hostname, f"📶 Latência alta: {ping} ms")
+    if ping_val >= 150 and can_alert(f"{hostname}_ping"):
+        add_alert(hostname, f"📶 Latência alta: {ping_val} ms")
 
     if status == "offline" and can_alert(f"{hostname}_offline"):
         add_alert(hostname, "⚫ Dispositivo Offline")
@@ -219,9 +220,7 @@ def create_database():
             email TEXT
         )
     """)
-    
     conn.commit()
-    conn.close()
     
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
@@ -538,10 +537,11 @@ def api_terminal(hostname):
     commands[hostname] = command
 
     timeout, start = 15, time.time()
-    while time.time() - start < timeout:
-        if terminal_results.get(hostname):
-            break
-        time.sleep(0.5)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        while time.time() - start < timeout:
+            if terminal_results.get(hostname):
+                break
+            time.sleep(0.5)
 
     return jsonify({"output": terminal_results.get(hostname, "Sem resposta do agente")})
 
@@ -734,8 +734,6 @@ def secret_reset_admin():
     except Exception as e:
         return f"Erro ao resetar: {str(e)}", 500
     
-
-
 @app.route('/download-agent')
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -790,22 +788,6 @@ def api_mapa_dados():
 
     return jsonify({"dispositivos": dispositivos_cadastrados})
 
-def checar_ip_individual(ip):
-    sistema = platform.system().lower()
-    comando = ["ping", "-n", "1", "-w", "400", ip] if sistema == "windows" else ["ping", "-c", "1", "-W", "1", ip]
-    try:
-        resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1.5)
-        if resultado.returncode == 0:
-            return ip
-    except:
-        pass
-    return None
-
-from concurrent.futures import ThreadPoolExecutor
-from flask import jsonify, request, session
-from ping3 import ping
-import sqlite3
-
 # 💡 FUNÇÃO AUXILIAR ESSENCIAL PARA O THREAD POOL FUNCIONAR
 def checar_ip_individual(ip):
     try:
@@ -816,7 +798,6 @@ def checar_ip_individual(ip):
     except Exception:
         pass
     return None
-
 
 @app.route("/api/descoberta/scan")
 def api_descoberta_scan():
@@ -842,7 +823,6 @@ def api_descoberta_scan():
 
     return jsonify({"hosts_encontrados": hosts_validos})
 
-
 @app.route("/api/dispositivos/adicionar", methods=["POST"])
 def api_adicionar_descoberto():
     if "user" not in session:
@@ -863,7 +843,6 @@ def api_adicionar_descoberto():
         # 💡 EVITA DUPLICADOS: Garante que o mesmo IP não seja adicionado duas vezes
         cursor.execute("SELECT id FROM dispositivos WHERE ip = ?", (ip,))
         if cursor.fetchone():
-            conn.close()
             return jsonify({"success": False, "error": "Este dispositivo já está cadastrado!"}), 400
             
         cursor.execute(
@@ -878,6 +857,7 @@ def api_adicionar_descoberto():
         # Garante que a conexão feche independente de ter dado erro ou sucesso
         if conn:
             conn.close()
+
 @app.route('/<pagina>')
 def carregar_pagina_coringa(pagina):
     if "user" not in session:
@@ -913,11 +893,3 @@ def add_header(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
-
-# =========================================
-# FUNÇÃO DE INICIALIZAÇÃO SEGURA DO APP
-# =========================================
-if __name__ == "__main__":
-    # Mantido em escopo local para evitar colisões com o gunicorn no ambiente da Render
-    port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
