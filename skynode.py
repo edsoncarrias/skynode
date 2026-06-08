@@ -1,279 +1,923 @@
-import socket
-import json
-import platform
-import psutil
-import time
-import requests
 import os
-import pyautogui
-from ping3 import ping
-import mss
-from PIL import Image
-import configparser  # Biblioteca nativa para ler arquivos .ini
+import io
+import time
+import json
+import uuid
+import socket
+import sqlite3
+import zipfile
+import platform
+import threading
+import requests
+import subprocess
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
-# =========================================
-# CARREGAMENTO DINÂMICO DE CONFIGURAÇÃO
-# =========================================
+# Flask e suas extensões reunidos em blocos únicos
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify, send_file, abort
+from flask_socketio import SocketIO, emit
+from werkzeug.security import generate_password_hash, check_password_hash
 
-CONFIG_FILE = "config.ini"
-config = configparser.ConfigParser()
+# Bibliotecas de IA
+import ollama
 
-# Configurações padrão atualizadas para o novo modelo HTTP
-DEFAULT_CONFIG = {
-    'SERVER': {
-        'url': 'https://skynode-k6nw.onrender.com'
-    }
-}
+# 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
+LIMITE_CPU = 50.0  # Se a CPU passar de 50%, dispara
+LIMITE_RAM = 60.0  # Se a RAM passar de 60%, dispara
 
-if not os.path.exists(CONFIG_FILE):
-    config.read_dict(DEFAULT_CONFIG)
-    with open(CONFIG_FILE, 'w') as configfile:
-        config.write(configfile)
-    print(f"⚠️ Arquivo {CONFIG_FILE} não encontrado. Criado um modelo padrão.")
-else:
-    config.read(CONFIG_FILE)
-
-# Ajuste da leitura para suportar o formato antigo e o novo sem quebrar
-try:
-    if config.has_section('SERVER'):
-        URL_BASE = config.get('SERVER', 'url').strip().rstrip('/')
-    elif config.has_section('SERVER_CONFIG'):
-        # Caso o arquivo ainda use o padrão antigo, reconstrói o endereço correto
-        server_ip = config.get('SERVER_CONFIG', 'server_ip').strip()
-        URL_BASE = f"https://{server_ip.replace('https://', '').replace('http://', '')}"
-    else:
-        URL_BASE = "https://skynode-k6nw.onrender.com"
-except Exception as e:
-    print("❌ Erro ao ler o arquivo config.ini. Usando padrões de emergência.", e)
-    URL_BASE = "https://skynode-k6nw.onrender.com"
-
-# Captura o hostname real da máquina globalmente uma única vez
-HOSTNAME_GLOBAL = socket.gethostname()
-
-# Extrai apenas o endereço de domínio/IP para o comando de PING funcionar nativamente
-HOST_PARA_PING = URL_BASE.replace("https://", "").replace("http://", "").split("/")[0]
-
-# =========================================
-# FAILSAFE
-# =========================================
-pyautogui.FAILSAFE = False
-
-# =========================================
-# IP LOCAL E PÚBLICO
-# =========================================
-def get_local_ip():
+def verificar_limites_RMM(dispositivo):
+    hostname = dispositivo.get("hostname", "Desconhecido")
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "Indisponível"
-
-def get_public_ip():
-    try:
-        return requests.get("https://api.ipify.org", timeout=5).text
-    except Exception:
-        return "Indisponível"
-
-# ==============================================================================
-# FUNÇÃO PARA COLETAR PROCESSOS ATIVOS
-# ==============================================================================
-def obter_processos_ativos():
-    lista_processos = []
-    for proc in sorted(psutil.process_iter(['pid', 'name', 'memory_percent', 'cpu_percent']), 
-                       key=lambda x: x.info['memory_percent'] or 0, 
-                       reverse=True)[:20]:
-        try:
-            lista_processos.append({
-                'pid': proc.info['pid'],
-                'name': proc.info['name'],
-                'cpu': round(proc.info['cpu_percent'] or 0, 1),
-                'ram': round(proc.info['memory_percent'] or 0, 1)
-            })
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-    return lista_processos
-
-# ==============================================================================
-# SCANNER DE DESCOBERTA ICMP (REDE LOCAL)
-# ==============================================================================
-def realizar_varredura_icmp():
-    ip_local = get_local_ip()
-    if ip_local == "Indisponível":
+        cpu = float(dispositivo.get("cpu", 0))
+        ram = float(dispositivo.get("ram", 0))
+    except (ValueError, TypeError):
         return
-    
-    # Descobre os 3 primeiros octetos (ex: de 192.168.1.55 vira 192.168.1.)
-    base_ip = ".".join(ip_local.split(".")[:3]) + "."
-    print(f"🔍 Iniciando Varredura ICMP na rede local: {base_ip}0/24...")
-    
-    dispositivos_encontrados = []
-    
-    # Varre do IP 1 ao 254 (Ajuste o timeout baixo para ser rápido)
-    for i in range(1, 255):
-        ip_alvo = f"{base_ip}{i}"
-        
-        # Ignora o próprio IP do agente para não duplicar
-        if ip_alvo == ip_local:
-            continue
-            
-        try:
-            res = ping(ip_alvo, timeout=0.2)  # Timeout curto para o laço correr rápido
-            if res is not None and res is not False:
-                dispositivos_encontrados.append({
-                    "ip": ip_alvo,
-                    "status": "online",
-                    "hostname": f"Dispositivo {i}"
-                })
-        except Exception:
-            pass
-            
-    # Se achou alguém, despacha direto para a nova API do painel
-    if dispositivos_encontrados:
-        print(f"🟢 Varredura concluída! {len(dispositivos_encontrados)} dispositivos achados.")
-        payload = {
-            "agente_pai": HOSTNAME_GLOBAL,
-            "dispositivos": dispositivos_encontrados
-        }
-        try:
-            requests.post(f"{URL_BASE}/api/descoberta", json=payload, timeout=10)
-        except Exception as e:
-            print("❌ Erro ao enviar dados de descoberta para a Render:", e)
+
+    print(f"DEBUG: Testando {hostname} -> CPU: {cpu}% | RAM: {ram}%")
+
+    if cpu > LIMITE_CPU:
+        print(f"\n🔥 [ALERTA CRÍTICO] - O dispositivo '{hostname}' está com uso de CPU alto: {cpu}%!")
+
+    if ram > LIMITE_RAM:
+        print(f"\n🧠 [ALERTA ATENÇÃO] - O dispositivo '{hostname}' está com uso de RAM alto: {ram}%!\n")
 
 # =========================================
-# LOOP PRINCIPAL (COMPATÍVEL COM A RENDER)
+# INTEGRAÇÃO OLLAMA (IA LOCAL + AUTO-FIX)
 # =========================================
-print(f"🚀 SkyNode Agent Iniciado apontando para: {URL_BASE}")
-
-# Armazena o relatório da última execução de comando para enviar ao painel
-ultimo_resultado = ""
-
-# Controle de tempo para o gatilho da varredura de rede local
-ultimo_scan_rede = 0
-
-while True:
+def ai_analyze_alert(message):
     try:
-        system = platform.system()
-        cpu = psutil.cpu_percent(interval=None) 
-        ram = psutil.virtual_memory().percent
-        disk = psutil.disk_usage('/').percent
+        response = ollama.chat(
+            model='phi3',
+            messages=[
+                {
+                    "role": "system", 
+                    "content": (
+                        "Você é um analista SysAdmin e assistente automatizado do sistema RMM SkyNode. "
+                        "Explique tecnicamente este alerta de forma muito curta (máximo 2 frases). "
+                        "Depois, obrigatoriamente na ÚLTIMA LINHA, forneça um comando de terminal (Windows CMD) "
+                        "REAL e GENÉRICO que possa mitigar ou resolver o problema, sem inventar variáveis fictícias como 'xyz' ou 'nome_do_processo'. "
+                        "Se for CPU alta, sugira listar os processos que mais consomem ou limpar arquivos temporários. "
+                        "Formato estrito da última linha: COMMAND: seu_comando_aqui"
+                        "Exemplo de saída:\n"
+                        "O uso de disco está crítico devido a arquivos temporários acumulados.\n"
+                        "COMMAND: del /q /s %temp%\\*"
+                    )
+                },
+                {
+                    "role": "user", 
+                    "content": f"Analise este alerta do agente: {message}"
+                }
+            ]
+        )
+        full_text = response['message']['content']
+        explanation = []
+        suggested_command = "echo 'Nenhuma acao automatica definida'"
         
-        try:
-            latency = ping(HOST_PARA_PING, timeout=2)
-            latency = round(latency * 1000, 1) if latency else 999
-        except Exception:
-            latency = 999
-            
-        local_ip = get_local_ip()
-        public_ip = get_public_ip()
-
-        data = {
-            "hostname": HOSTNAME_GLOBAL,
-            "system": system,
-            "cpu": cpu,
-            "ram": ram,
-            "disk": disk,
-            "ping": latency,
-            "local_ip": local_ip,
-            "public_ip": public_ip
-        }
-
-        # -----------------------------------------
-        # 1. ENVIO DOS DADOS DE STATUS (MÁQUINA ONLINE)
-        # -----------------------------------------
-        try:
-            requests.post(f"{URL_BASE}/api/status", json=data, timeout=5)
-        except Exception as e:
-            print("❌ Erro ao sincronizar dados de status com o servidor:", e)
-
-        # -----------------------------------------
-        # 2. CAPTURA E ENVIO DE SCREENSHOT
-        # -----------------------------------------
-        screenshot_path = "temp_screen.jpg"
-        try:
-            with mss.mss() as sct:
-                monitor = sct.monitors[1]
-                screenshot = sct.grab(monitor)
-                img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
-                img = img.resize((1024, 576))
-                img.save(screenshot_path, "JPEG", quality=20, optimize=True)
-
-            with open(screenshot_path, "rb") as f:
-                arquivos = {'screenshot': f}
-                dados_form = {'hostname': HOSTNAME_GLOBAL}
-                requests.post(f"{URL_BASE}/api/screenshot", data=dados_form, files=arquivos, timeout=10)
-        except Exception as e:
-            print("❌ Erro ao enviar captura de tela:", e)
-        finally:
-            if os.path.exists(screenshot_path):
-                try:
-                    os.remove(screenshot_path)
-                except Exception:
-                    pass
-
-        # -----------------------------------------
-        # 3. VERIFICAÇÃO E EXECUÇÃO DE COMANDOS PENDENTES
-        # -----------------------------------------
-        command = ""
-        try:
-            cmd_data = {"hostname": HOSTNAME_GLOBAL, "result": ultimo_resultado}
-            response = requests.post(f"{URL_BASE}/api/command", json=cmd_data, timeout=10)
-            
-            ultimo_resultado = ""  # Limpa o resultado enviado
-            
-            if response.status_code == 200:
-                command = response.json().get("command", "").strip()
-        except Exception as e:
-            print("❌ Erro ao consultar fila de comandos do painel:", e)
-            command = ""
-
-        # Processamento das ações recebidas do painel
-        if command:
-            try:
-                if command.startswith("mouse_move"):
-                    _, x, y = command.split("|")
-                    pyautogui.moveTo(int(x), int(y))
-                    ultimo_resultado = "Mouse movido"
-                elif command == "mouse_click":
-                    pyautogui.click()
-                    ultimo_resultado = "Click executado"
-                elif command == "double_click":
-                    pyautogui.doubleClick()
-                    ultimo_resultado = "Duplo click"
-                elif command == "right_click":
-                    pyautogui.rightClick()
-                    ultimo_resultado = "Click direito"
-                elif command.startswith("keyboard"):
-                    _, text = command.split("|", 1)
-                    pyautogui.write(text, interval=0.03)
-                    ultimo_resultado = "Texto digitado"
-                elif command == "press_enter":
-                    pyautogui.press("enter")
-                    ultimo_resultado = "ENTER pressionado"
-                elif command == "press_backspace":
-                    pyautogui.press("backspace")
-                    ultimo_resultado = "BACKSPACE pressionado"
-                elif command == "get_processes":
-                    processos = obter_processos_ativos()
-                    ultimo_resultado = "PROCESS_LIST:" + json.dumps(processos)
-                else:
-                    ultimo_resultado = os.popen(command).read()
-                    if not ultimo_resultado.strip():
-                        ultimo_resultado = "Comando executado com sucesso."
-            except Exception as e:
-                ultimo_resultado = f"Erro ao executar comando: {str(e)}"
-
+        for line in full_text.split('\n'):
+            if line.strip().startswith("COMMAND:"):
+                suggested_command = line.replace("COMMAND:", "").strip()
+            elif line.strip():
+                explanation.append(line.strip())
+                
+        return " ".join(explanation), suggested_command
     except Exception as e:
-        print("❌ ERRO INTERNO NO LOOP:", e)
+        print("❌ OLLAMA ERRO (Verifique se o Ollama está aberto):", e)
+        return "IA Local indisponível no momento.", "echo 'Erro na IA'"
 
-    # 💡 GATILHO TEMPORAL: Realiza o scan ICMP a cada 120 segundos (2 minutos)
-    if time.time() - ultimo_scan_rede > 120:
+# =========================================
+# TELEGRAM CONFIG
+# =========================================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+def send_telegram_alert(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        response = requests.post(url, json=payload, timeout=10)
+        print("📨 Telegram:", response.status_code)
+    except Exception as e:
+        print("❌ Telegram erro:", e)
+
+# =========================================
+# APP CONFIG
+# =========================================
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "skynode_secret")
+
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="threading"
+)
+
+# =========================================
+# PATHS E DIRETÓRIOS
+# =========================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
+DATABASE = os.path.join(DATABASE_FOLDER, "skynode.db")
+SCREENSHOT_FOLDER = os.path.join(BASE_DIR, "static", "screenshots")
+
+os.makedirs(DATABASE_FOLDER, exist_ok=True)
+os.makedirs(SCREENSHOT_FOLDER, exist_ok=True)
+
+# =========================================
+# MEMÓRIA GLOBAL
+# =========================================
+devices = []
+commands = {}
+terminal_results = {}
+alerts = []  
+alert_cooldown = {}
+
+# =========================================
+# LÓGICA DE ALERTAS
+# =========================================
+def add_alert(hostname, message):
+    timestamp = time.strftime("%H:%M:%S")
+    alert_id = str(uuid.uuid4())[:8]
+    
+    ai_explanation, ai_command = ai_analyze_alert(message)
+    
+    alert_data = {
+        "id": alert_id,
+        "hostname": hostname,
+        "text": f"[{timestamp}] {message}",
+        "ai_analysis": ai_explanation,
+        "ai_command": ai_command,
+        "timestamp": timestamp
+    }
+    
+    alerts.append(alert_data)
+    if len(alerts) > 100:
+        alerts.pop(0)
+
+    print(f"🚨 Alerta: {alert_data['text']}")
+    print(f"🤖 IA LOCAL: {alert_data['ai_analysis']}")
+    print(f"🛠️ COMANDO SUGERIDO: {alert_data['ai_command']}")
+
+    socketio.emit("new_alert", alert_data)
+    send_telegram_alert(f"{alert_data['text']}\n\n🤖 IA Diagnóstico: {ai_explanation}")
+
+def check_alerts(device):
+    hostname = device.get("hostname", "unknown")
+    try:
+        cpu = float(device.get("cpu", 0))
+        ram = float(device.get("ram", 0))
+        disk = float(device.get("disk", 0))
+        ping = float(device.get("ping", 0))
+    except:
+        return
+        
+    status = get_device_status(device)
+    now = time.time()
+    cooldown = 300  
+
+    def can_alert(key):
+        last = alert_cooldown.get(key, 0)
+        if now - last >= cooldown:
+            alert_cooldown[key] = now
+            return True
+        return False
+
+    if cpu >= 90 and can_alert(f"{hostname}_cpu"):
+        add_alert(hostname, f"🔥 CPU alta: {cpu}%")
+
+    if ram >= 85 and can_alert(f"{hostname}_ram"):
+        add_alert(hostname, f"🧠 RAM alta: {ram}%")
+
+    if disk >= 90 and can_alert(f"{hostname}_disk"):
+        add_alert(hostname, f"💽 Disco cheio: {disk}%")
+
+    if ping >= 150 and can_alert(f"{hostname}_ping"):
+        add_alert(hostname, f"📶 Latência alta: {ping} ms")
+
+    if status == "offline" and can_alert(f"{hostname}_offline"):
+        add_alert(hostname, "⚫ Dispositivo Offline")
+
+# =========================================
+# BANCO DE DADOS (CENTRALIZADO - SQLITE CORRIGIDO)
+# =========================================
+def connect_db():
+    conn = sqlite3.connect(DATABASE, check_same_thread=False)
+    return conn
+
+def create_database():
+    conn = connect_db()
+    cursor = conn.cursor()
+    
+    # Cria a tabela garantindo que todas as colunas necessárias existam
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'tecnico',
+            email TEXT
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+    
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
+        conn.commit()
+    except Exception:
+        pass
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hostname TEXT,
+        cpu REAL,
+        ram REAL,
+        disk REAL,
+        ping REAL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS dispositivos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hostname TEXT UNIQUE NOT NULL,
+        ip TEXT NOT NULL,
+        status TEXT DEFAULT 'offline'
+    )
+    """)
+    
+    cursor.execute("SELECT * FROM users WHERE username=?", ("admin",))
+    if not cursor.fetchone():
+        admin_password = generate_password_hash("admin123")
+        cursor.execute("INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)", 
+                       ("admin", admin_password, "admin", "admin@skynode.com"))
+    
+    conn.commit()
+    conn.close()
+    print("✅ Banco de dados SQLite inicializado com sucesso!")
+
+def save_metrics(device):
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT INTO metrics (hostname, cpu, ram, disk, ping)
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            device.get("hostname"),
+            device.get("cpu", 0),
+            device.get("ram", 0),
+            device.get("disk", 0),
+            device.get("ping", 0)
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("❌ Erro save metrics:", e)
+
+# Executa inicialização única
+create_database()
+
+# =========================================
+# CONTROLE DE ESTADO DOS DISPOSITIVOS
+# =========================================
+def get_device_status(device):
+    return "online" if (time.time() - device.get("last_seen", 0)) <= 120 else "offline"
+
+def serialize_devices():
+    updated_devices = []
+    for device in devices:
+        updated_devices.append({
+            "hostname": device.get("hostname", "N/A"),
+            "system": device.get("system", "N/A"),
+            "cpu": device.get("cpu", 0),
+            "ram": device.get("ram", 0),
+            "disk": device.get("disk", 0),
+            "ping": device.get("ping", 0),
+            "local_ip": device.get("local_ip", "N/A"),
+            "public_ip": device.get("public_ip", "N/A"),
+            "status": get_device_status(device),
+            "ip": device.get("ip", "")
+        })
+    return updated_devices
+
+# ====================================================================
+# 🚨 NOVAS ROTAS HTTP COMPLETAS PARA TRATAR O FORMATO DO AGENTE (ANTI-405)
+# ====================================================================
+
+@app.route("/api/status", methods=["GET", "POST"])
+@app.route("/api/status/", methods=["GET", "POST"])
+def api_receber_status():
+    if request.method == "GET":
+        return jsonify({"status": "sucesso", "message": "API operacional. Use POST para enviar dados."}), 200
+        
+    try:
+        dados = request.get_json(force=True, silent=True)
+        if not dados:
+            return jsonify({"status": "erro", "message": "Sem dados ou JSON inválido"}), 400
+            
+        hostname = dados.get("hostname")
+        if not hostname:
+            return jsonify({"status": "erro", "message": "Hostname ausente"}), 400
+            
+        dados["last_seen"] = time.time()
+        dados["ip"] = request.remote_addr
+        dados["status"] = "online"
+        
+        global devices
+        devices = [d for d in devices if d.get("hostname") != hostname]
+        devices.append(dados)
+        
+        save_metrics(dados)
+        check_alerts(dados)
+        
+        socketio.emit("devices_update", serialize_devices())
+        return jsonify({"status": "sucesso"}), 200
+    except Exception as e:
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+@app.route("/api/screenshot", methods=["GET", "POST"])
+@app.route("/api/screenshot/", methods=["GET", "POST"])
+def api_receber_screenshot():
+    if request.method == "GET":
+        return jsonify({"status": "erro", "message": "Use POST para upload de arquivos"}), 200
+        
+    try:
+        hostname = request.form.get("hostname")
+        file = request.files.get("screenshot")
+        
+        if hostname and file:
+            caminho_foto = os.path.join(SCREENSHOT_FOLDER, f"{hostname}.png")
+            file.save(caminho_foto)
+            return jsonify({"status": "sucesso"}), 200
+            
+        return jsonify({"status": "erro", "message": "Dados ou arquivos incompletos"}), 400
+    except Exception as e:
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+@app.route("/api/command", methods=["GET", "POST"])
+@app.route("/api/command/", methods=["GET", "POST"])
+def api_processar_comando():
+    try:
+        dados = request.get_json(force=True, silent=True)
+        hostname = dados.get("hostname") if dados else request.args.get("hostname")
+        
+        if not hostname:
+            return jsonify({"command": "echo 'Sem hostname'"}), 200
+            
+        # Verifica se há resultado de comando executado vindo do agente
+        if dados and "output" in dados:
+            terminal_results[hostname] = dados.get("output")
+            
+        command = commands.get(hostname, "")
+        if command:
+            commands[hostname] = "" # Limpa após entregar
+            return jsonify({"command": command}), 200
+            
+        return jsonify({"command": "echo online"}), 200
+    except Exception as e:
+        return jsonify({"command": f"echo 'Erro no servidor: {str(e)}'"}), 200
+
+# =========================================
+# ROTAS FLASK (DASHBOARD E INTERFACE)
+# =========================================
+
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username") or request.form.get("user") or request.form.get("login")
+        password = request.form.get("password") or request.form.get("senha")
+        
+        if not username or not password:
+            flash("Preencha todos os campos!")
+            return render_template("login.html")
+            
+        username = username.strip()
+        
+        conn = connect_db()
+        conn.row_factory = sqlite3.Row  # 💡 O segredo: permite acessar user['password'] em vez de user[2]
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            # Converte para dicionário para garantir acesso seguro por chave
+            user_dict = dict(user)
+            
+            # Valida o hash buscando diretamente a chave 'password'
+            if check_password_hash(user_dict["password"], password):
+                session["user"] = user_dict["username"]
+                session["role"] = user_dict["role"]
+                return redirect(url_for("dashboard"))
+            
+        flash("Usuário ou senha inválidos!")
+    return render_template("login.html")
+
+@app.route("/dashboard")
+def dashboard():
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("dashboard.html", user=session["user"], role=session["role"], devices=serialize_devices())
+
+@app.route("/api/devices")
+def api_devices():
+    return jsonify(serialize_devices())
+
+@app.route("/api/alerts")
+def api_alerts():
+    return jsonify(alerts[-20:])
+
+@app.route("/api/execute_ai_command", methods=["POST"])
+def execute_ai_command():
+    if "user" not in session:
+        return jsonify({"error": "Não autorizado"}), 401
+        
+    data = request.json or {}
+    alert_id = data.get("alert_id")
+    hostname = data.get("hostname")
+    
+    alert = next((a for a in alerts if a["id"] == alert_id), None)
+    if not alert:
+        return jsonify({"error": "Alerta não encontrado"}), 404
+        
+    command_to_run = alert.get("ai_command")
+    terminal_results[hostname] = ""
+    commands[hostname] = command_to_run
+    
+    return jsonify({
+        "status": "success", 
+        "message": f"Comando de correção enviado para {hostname}!",
+        "command": command_to_run
+    })
+
+@app.route("/api/metrics/<hostname>")
+def obter_metricas_dispositivo(hostname):
+    try:
+        conn = connect_db()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT cpu, ram, disk, ping, created_at 
+            FROM metrics 
+            WHERE hostname = ? 
+            ORDER BY id DESC LIMIT 1
+        """, (hostname,))
+        
+        dado = cursor.fetchone()
+        conn.close()
+        
+        if dado:
+            # 💡 FIX SEGURO CONTRA CRASH: Converte o Row em dicionário manipulável do Python
+            dado_dict = dict(dado)
+            if dado_dict.get('created_at'):
+                try:
+                    # Se vier como String do banco, valida o tipo antes de tratar
+                    if isinstance(dado_dict['created_at'], str):
+                        pass 
+                except:
+                    dado_dict['created_at'] = str(dado_dict['created_at'])
+            return jsonify(dado_dict)
+            
+        return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0})
+    except Exception as e:
+        print(f"❌ Erro ao buscar métricas para o card: {e}")
+        return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0}), 500
+
+@app.route("/screenshots/<filename>")
+def screenshots(filename):
+    return send_from_directory(SCREENSHOT_FOLDER, filename)
+
+@app.route("/device/<hostname>")
+def device_details(hostname):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    
+    selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
+    if not selected_device:
+        return "Dispositivo não encontrado", 404
+        
+    return render_template("device_details.html", device=selected_device, screenshot=f"{hostname}.png", user=session["user"], role=session["role"])
+
+@app.route("/monitor/<hostname>")
+def monitor(hostname):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
+    if not selected_device:
+        return "Dispositivo não encontrado", 404
+    return render_template("monitor.html", device=selected_device, user=session["user"], role=session["role"])
+
+@app.route("/terminal/<hostname>")
+def terminal(hostname):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("terminal.html", hostname=hostname, user=session["user"], role=session["role"])
+
+@app.route("/viewer/<hostname>")
+def viewer(hostname):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("viewer.html", hostname=hostname, user=session["user"], role=session["role"])
+
+@app.route("/api/terminal/<hostname>", methods=["POST"])
+def api_terminal(hostname):
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+    
+    command = request.json.get("command", "").strip()
+    if not command:
+        return jsonify({"output": "Comando vazio"})
+
+    terminal_results[hostname] = ""
+    commands[hostname] = command
+
+    timeout, start = 15, time.time()
+    while time.time() - start < timeout:
+        if terminal_results.get(hostname):
+            break
+        time.sleep(0.5)
+
+    return jsonify({"output": terminal_results.get(hostname, "Sem resposta do agente")})
+
+@app.route("/remote/<hostname>")
+def remote(hostname):
+    if "user" not in session:
+        return redirect(url_for("login"))
+    
+    selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
+    if not selected_device:
+        return "Dispositivo não encontrado", 404
+
+    ip = selected_device.get("local_ip")
+    rustdesk_path = r"C:\Program Files\RustDesk\rustdesk.exe"
+    
+    if os.path.exists(rustdesk_path):
         try:
-            realizar_varredura_icmp()
+            subprocess.Popen(["cmd.exe", "/c", "start", "", rustdesk_path, ip])
         except Exception as e:
-            print("❌ Erro ao rodar varredura de rede:", e)
-        ultimo_scan_rede = time.time()
+            print("❌ Erro RustDesk:", e)
+    return redirect(url_for("device_details", hostname=hostname))
 
-    # Intervalo regulado em 5 segundos para manter a consistência e estabilidade
-    time.sleep(5)
+@app.route("/send_command/<hostname>/<command>")
+def send_command(hostname, command):
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+
+    terminal_results[hostname] = ""
+    commands[hostname] = command
+
+    timeout, start = 15, time.time()
+    while time.time() - start < timeout:
+        if terminal_results.get(hostname):
+            break
+        time.sleep(0.5)
+
+    return jsonify({
+        "hostname": hostname,
+        "command": command,
+        "output": terminal_results.get(hostname, "Sem resposta")
+    })
+
+@app.route('/users')
+def lista_usuarios():
+    if "user" not in session:
+        return redirect(url_for("login"))
+    
+    conn = connect_db()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, email, role FROM users")
+    usuarios_do_banco = cursor.fetchall()
+    conn.close()
+
+    lista_formatada = []
+    for u in usuarios_do_banco:
+        lista_formatada.append({
+            "username": u["username"],
+            "email": u["email"],
+            "role": u["role"]
+        })
+    return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
+
+@app.route('/add_user', methods=['POST'])
+def add_user():
+    if "user" not in session:
+        return redirect(url_for("login"))
+        
+    username = request.form.get('username') or request.form.get('user')
+    email = request.form.get('email')
+    password = request.form.get('password') or request.form.get('senha')
+    role = request.form.get('role') or 'tecnico'
+
+    if not username or not password:
+        flash("Erro: Campos obrigatórios ausentes!")
+        return redirect('/users')
+
+    username = username.strip()
+    hashed_password = generate_password_hash(password)
+    
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+            (username, email, hashed_password, role)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Erro ao inserir usuario: {e}")
+    finally:
+        conn.close()
+        
+    return redirect('/users')
+
+@app.route('/delete_user/<username>')
+def delete_user(username):
+    if "user" not in session:
+        return redirect(url_for("login"))
+        
+    if username == "admin":
+        return redirect('/users')
+    try:
+        with connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users WHERE username=?", (username,))
+            conn.commit()
+        return redirect('/users')
+    except Exception as e:
+        return f"<h3>Erro ao excluir usuário:</h3><p>{e}</p><a href='/users'>Voltar</a>", 500
+
+@app.route("/notepad")
+def notepad():
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("notepad.html", user=session["user"], role=session["role"])
+
+@app.route("/alerts")
+def alerts_page():
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("alerts.html", alerts=alerts, user=session["user"], role=session["role"])
+
+@app.route("/change_password", methods=["GET", "POST"])
+def change_password():
+    if "user" not in session:
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        current_password = request.form["current_password"]
+        new_password = request.form["new_password"]
+        confirm_password = request.form["confirm_password"]
+
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=?", (session["user"],))
+        user = cursor.fetchone()
+
+        if not user or not check_password_hash(user[2], current_password):
+            flash("Senha atual incorreta!")
+        elif new_password != confirm_password:
+            flash("As senhas não coincidem!")
+        else:
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["user"]))
+            conn.commit()
+            flash("Senha alterada com sucesso!")
+            conn.close()
+            return redirect(url_for("dashboard"))
+        conn.close()
+
+    return render_template("change_password.html", user=session["user"], role=session["role"])
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+@app.route("/secret-reset-admin")
+def secret_reset_admin():
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # Remove qualquer lixo ou duplicata que tenha ficado para trás
+        cursor.execute("DROP TABLE IF EXISTS users")
+        
+        # Recria a tabela limpinha
+        cursor.execute("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                role TEXT NOT NULL,
+                email TEXT
+            )
+        """)
+        
+        # Gera o hash perfeito para a senha admin123
+        nova_senha_hash = generate_password_hash("admin123")
+        
+        # Insere o administrador principal na ordem exata das colunas
+        cursor.execute(
+            "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)",
+            ("admin", nova_senha_hash, "admin", "admin@skynode.com")
+        )
+        
+        conn.commit()
+        conn.close()
+        return "SUCESSO: Banco de dados limpo e usuário 'admin' resetado para 'admin123'!", 200
+    except Exception as e:
+        return f"Erro ao resetar: {str(e)}", 500
+    
+
+
+@app.route('/download-agent')
+def download_agent():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    downloads_path = os.path.join(base_dir, 'downloads')
+    
+    agent_path = os.path.join(downloads_path, 'agent.exe')
+    config_path = os.path.join(downloads_path, 'config.ini')
+    
+    if not os.path.exists(agent_path) or not os.path.exists(config_path):
+        arquivos_reais = os.listdir(downloads_path) if os.path.exists(downloads_path) else "Pasta nao existe"
+        return f"Erro: Arquivos nao encontrados. Conteudo da pasta: {arquivos_reais}", 500
+
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(agent_path, 'agent.exe')
+        zipf.write(config_path, 'config.ini')
+            
+    memory_file.seek(0)
+    return send_file(
+        memory_file,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name='SkyNode_Agent.zip'
+    )
+
+@app.route("/mapa")
+def pagina_mapa():
+    if "user" not in session:
+        return redirect("/login")
+    return render_template("mapa_rede.html", user=session["user"], role=session["role"])
+
+@app.route("/api/mapa/dados")
+def api_mapa_dados():
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+        
+    dispositivos_cadastrados = []
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT hostname, ip, status FROM dispositivos")
+        for linha in cursor.fetchall():
+            dispositivos_cadastrados.append({
+                "hostname": linha[0],
+                "ip": linha[1],
+                "status": str(linha[2]).lower()
+            })
+        conn.close()
+    except Exception as e:
+        print(f"❌ Erro ao ler banco no Mapa: {e}")
+        dispositivos_cadastrados = [{"hostname": "Sem Agentes Cadastrados", "ip": "127.0.0.1", "status": "offline"}]
+
+    return jsonify({"dispositivos": dispositivos_cadastrados})
+
+def checar_ip_individual(ip):
+    sistema = platform.system().lower()
+    comando = ["ping", "-n", "1", "-w", "400", ip] if sistema == "windows" else ["ping", "-c", "1", "-W", "1", ip]
+    try:
+        resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1.5)
+        if resultado.returncode == 0:
+            return ip
+    except:
+        pass
+    return None
+
+from concurrent.futures import ThreadPoolExecutor
+from flask import jsonify, request, session
+from ping3 import ping
+import sqlite3
+
+# 💡 FUNÇÃO AUXILIAR ESSENCIAL PARA O THREAD POOL FUNCIONAR
+def checar_ip_individual(ip):
+    try:
+        # Envia um único ping rápido (timeout curto de 200ms para não travar a linha)
+        res = ping(ip, timeout=0.2)
+        if res is not None and res is not False:
+            return {"ip": ip, "hostname": f"Dispositivo {ip.split('.')[-1]}"}
+    except Exception:
+        pass
+    return None
+
+
+@app.route("/api/descoberta/scan")
+def api_descoberta_scan():
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+
+    subrede = request.args.get("subrede", "").strip()
+    if not subrede:
+        return jsonify({"error": "Sub-rede ausente"}), 400
+
+    # Se o usuário passar "192.168.1" ou "192.168.1.", remove o ponto final para evitar "192.168.1..1"
+    subrede = subrede.rstrip('.')
+
+    lista_ips = [f"{subrede}.{i}" for i in range(1, 255)]
+    hosts_validos = []
+
+    # Executa a varredura ultra rápida com as 50 threads em paralelo
+    with ThreadPoolExecutor(max_workers=50) as executor:
+        resultados = executor.map(checar_ip_individual, lista_ips)
+        for ip_respondido in resultados:
+            if ip_respondido:
+                hosts_validos.append(ip_respondido)
+
+    return jsonify({"hosts_encontrados": hosts_validos})
+
+
+@app.route("/api/dispositivos/adicionar", methods=["POST"])
+def api_adicionar_descoberto():
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+    
+    data = request.json or {}
+    hostname = data.get("hostname")
+    ip = data.get("ip")
+    
+    if not hostname or not ip:
+        return jsonify({"error": "Dados incompletos"}), 400
+    
+    conn = None
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        
+        # 💡 EVITA DUPLICADOS: Garante que o mesmo IP não seja adicionado duas vezes
+        cursor.execute("SELECT id FROM dispositivos WHERE ip = ?", (ip,))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({"success": False, "error": "Este dispositivo já está cadastrado!"}), 400
+            
+        cursor.execute(
+            "INSERT INTO dispositivos (hostname, ip, status) VALUES (?, ?, 'online')", 
+            (hostname, ip)
+        )
+        conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Erro no banco de dados: {str(e)}"}), 500
+    finally:
+        # Garante que a conexão feche independente de ter dado erro ou sucesso
+        if conn:
+            conn.close()
+@app.route('/<pagina>')
+def carregar_pagina_coringa(pagina):
+    if "user" not in session:
+        return redirect(url_for("login"))
+
+    paginas_menu = ['dispositivos', 'dispositivo', 'monitoramento', 'configuracoes', 'configuracao', 'mapa']
+    if pagina in paginas_menu:
+        pasta_templates = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+        if os.path.exists(pasta_templates):
+            arquivos_reais = os.listdir(pasta_templates)
+            if f"{pagina}.html" in arquivos_reais:
+                return render_template(f"{pagina}.html", user=session["user"], role=session["role"], devices=serialize_devices())
+    return "Rota não mapeada no menu", 404
+
+@app.route("/api/processos/<hostname>", methods=["GET"])
+def api_processos(hostname):
+    if "user" not in session:
+        return jsonify({"error": "unauthorized"}), 401
+
+    terminal_results[hostname] = ""
+    commands[hostname] = "get_processes"
+
+    timeout, start = 15, time.time()
+    while time.time() - start < timeout:
+        if terminal_results.get(hostname):
+            break
+        time.sleep(0.5)
+    return jsonify({"processos": terminal_results.get(hostname, "Sem resposta do agente")})
+
+@app.after_request
+def add_header(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+# =========================================
+# FUNÇÃO DE INICIALIZAÇÃO SEGURA DO APP
+# =========================================
+if __name__ == "__main__":
+    # Mantido em escopo local para evitar colisões com o gunicorn no ambiente da Render
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
