@@ -71,10 +71,11 @@ def send_telegram_alert(message):
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "skynode_secret")
 
+# Mude async_mode para "eventlet" para alinhar com o Gunicorn da Render
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode="threading"
+    async_mode="eventlet"
 )
 
 # =========================================
