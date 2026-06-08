@@ -682,26 +682,37 @@ def secret_reset_admin():
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     downloads_path = os.path.join(base_dir, 'downloads')
+    
+    # Cria a pasta em tempo de execução se ela não existir, impedindo o crash
+    os.makedirs(downloads_path, exist_ok=True)
+    
     agent_path = os.path.join(downloads_path, 'agent.exe')
     config_path = os.path.join(downloads_path, 'config.ini')
     
+    # Se os arquivos não existirem, avisa sem derrubar o servidor python
     if not os.path.exists(agent_path) or not os.path.exists(config_path):
-        arquivos_reais = os.listdir(downloads_path) if os.path.exists(downloads_path) else "Pasta nao existe"
-        return f"Erro: Arquivos nao encontrados: {arquivos_reais}", 500
+        try:
+            arquivos_reais = os.listdir(downloads_path)
+        except Exception:
+            arquivos_reais = "Erro ao listar diretório"
+        return f"Erro: Arquivos do agente (agent.exe / config.ini) nao foram encontrados na pasta downloads. Arquivos na pasta: {arquivos_reais}", 404
 
-    memory_file = io.BytesIO()
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(agent_path, 'agent.exe')
-        zipf.write(config_path, 'config.ini')
-            
-    memory_file.seek(0)
-    return send_file(
-        memory_file,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name='SkyNode_Agent.zip'
-    )
-
+    try:
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(agent_path, 'agent.exe')
+            zipf.write(config_path, 'config.ini')
+                
+        memory_file.seek(0)
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='SkyNode_Agent.zip'
+        )
+    except Exception as e:
+        return f"Erro ao gerar o pacote ZIP: {str(e)}", 500
+    
 @app.route("/mapa")
 def pagina_mapa():
     if "user" not in session:
