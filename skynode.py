@@ -20,6 +20,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from ping3 import ping
 
 # 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
+
 LIMITE_CPU = 50.0  # Se a CPU passar de 50%, dispara
 LIMITE_RAM = 60.0  # Se a RAM passar de 60%, dispara
 
@@ -172,6 +173,8 @@ def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
+    # 1. Cria a tabela de usuários se não existir
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,6 +191,8 @@ def create_database():
         conn.commit()
     except Exception:
         pass
+
+    # 2. Cria as outras tabelas do sistema
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
@@ -209,16 +214,26 @@ def create_database():
         status TEXT DEFAULT 'offline'
     )
     """)
+    conn.commit()
     
-    cursor.execute("SELECT * FROM users WHERE username=?", ("admin",))
-    if not cursor.fetchone():
-        admin_password = generate_password_hash("admin123")
-        cursor.execute("INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)", 
-                       ("admin", admin_password, "admin", "admin@skynode.com"))
+    # 3. FORÇA BRUTA: Remove o admin antigo (se houver) para evitar hash corrompido
+    cursor.execute("DELETE FROM users WHERE username=?", ("admin",))
+    conn.commit()
+    
+    # 4. Insere o admin do zero com a criptografia perfeita do Werkzeug
+    admin_password = generate_password_hash("admin123")
+    cursor.execute("""
+        INSERT INTO users (username, password, role, email) 
+        VALUES (?, ?, ?, ?)
+    """, ("admin", admin_password, "admin", "admin@skynode.com"))
     
     conn.commit()
     conn.close()
-    print("✅ Banco de dados SQLite initialized successfully!")
+    print("✅ Banco de dados SQLite inicializado e ADMIN resetado com sucesso!")
+
+    # =========================================
+    #FIM DATA BASE
+    # =========================================
 
 def save_metrics(device):
     try:
