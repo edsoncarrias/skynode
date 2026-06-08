@@ -9,7 +9,7 @@ import pyautogui
 from ping3 import ping
 import mss
 from PIL import Image
-import configparser
+import configparser  # Biblioteca nativa para ler arquivos .ini
 
 # =========================================
 # CARREGAMENTO DINÂMICO DE CONFIGURAÇÃO
@@ -18,6 +18,7 @@ import configparser
 CONFIG_FILE = "config.ini"
 config = configparser.ConfigParser()
 
+# Configurações padrão atualizadas para o novo modelo HTTP
 DEFAULT_CONFIG = {
     'SERVER': {
         'url': 'https://skynode-k6nw.onrender.com'
@@ -32,10 +33,12 @@ if not os.path.exists(CONFIG_FILE):
 else:
     config.read(CONFIG_FILE)
 
+# Ajuste da leitura para suportar o formato antigo e o novo sem quebrar
 try:
     if config.has_section('SERVER'):
         URL_BASE = config.get('SERVER', 'url').strip().rstrip('/')
     elif config.has_section('SERVER_CONFIG'):
+        # Caso o arquivo ainda use o padrão antigo, reconstrói o endereço correto
         server_ip = config.get('SERVER_CONFIG', 'server_ip').strip()
         URL_BASE = f"https://{server_ip.replace('https://', '').replace('http://', '')}"
     else:
@@ -44,7 +47,10 @@ except Exception as e:
     print("❌ Erro ao ler o arquivo config.ini. Usando padrões de emergência.", e)
     URL_BASE = "https://skynode-k6nw.onrender.com"
 
+# Captura o hostname real da máquina globalmente uma única vez
 HOSTNAME_GLOBAL = socket.gethostname()
+
+# Extrai apenas o endereço de domínio/IP para o comando de PING funcionar nativamente
 HOST_PARA_PING = URL_BASE.replace("https://", "").replace("http://", "").split("/")[0]
 
 # =========================================
@@ -98,19 +104,22 @@ def realizar_varredura_icmp():
     if ip_local == "Indisponível":
         return
     
+    # Descobre os 3 primeiros octetos (ex: de 192.168.1.55 vira 192.168.1.)
     base_ip = ".".join(ip_local.split(".")[:3]) + "."
     print(f"🔍 Iniciando Varredura ICMP na rede local: {base_ip}0/24...")
     
     dispositivos_encontrados = []
     
+    # Varre do IP 1 ao 254 (Ajuste o timeout baixo para ser rápido)
     for i in range(1, 255):
         ip_alvo = f"{base_ip}{i}"
         
+        # Ignora o próprio IP do agente para não duplicar
         if ip_alvo == ip_local:
             continue
             
         try:
-            res = ping(ip_alvo, timeout=0.2)
+            res = ping(ip_alvo, timeout=0.2)  # Timeout curto para o laço correr rápido
             if res is not None and res is not False:
                 dispositivos_encontrados.append({
                     "ip": ip_alvo,
@@ -120,6 +129,7 @@ def realizar_varredura_icmp():
         except Exception:
             pass
             
+    # Se achou alguém, despacha direto para a nova API do painel
     if dispositivos_encontrados:
         print(f"🟢 Varredura concluída! {len(dispositivos_encontrados)} dispositivos achados.")
         payload = {
@@ -132,11 +142,14 @@ def realizar_varredura_icmp():
             print("❌ Erro ao enviar dados de descoberta para a Render:", e)
 
 # =========================================
-# LOOP PRINCIPAL
+# LOOP PRINCIPAL (COMPATÍVEL COM A RENDER)
 # =========================================
 print(f"🚀 SkyNode Agent Iniciado apontando para: {URL_BASE}")
 
+# Armazena o relatório da última execução de comando para enviar ao painel
 ultimo_resultado = ""
+
+# Controle de tempo para o gatilho da varredura de rede local
 ultimo_scan_rede = 0
 
 while True:
@@ -166,13 +179,17 @@ while True:
             "public_ip": public_ip
         }
 
-        # 1. Envio de Status
+        # -----------------------------------------
+        # 1. ENVIO DOS DADOS DE STATUS (MÁQUINA ONLINE)
+        # -----------------------------------------
         try:
             requests.post(f"{URL_BASE}/api/status", json=data, timeout=5)
         except Exception as e:
             print("❌ Erro ao sincronizar dados de status com o servidor:", e)
 
-        # 2. Captura de Tela
+        # -----------------------------------------
+        # 2. CAPTURA E ENVIO DE SCREENSHOT
+        # -----------------------------------------
         screenshot_path = "temp_screen.jpg"
         try:
             with mss.mss() as sct:
@@ -195,12 +212,15 @@ while True:
                 except Exception:
                     pass
 
-        # 3. Comandos Pendentes
+        # -----------------------------------------
+        # 3. VERIFICAÇÃO E EXECUÇÃO DE COMANDOS PENDENTES
+        # -----------------------------------------
         command = ""
         try:
             cmd_data = {"hostname": HOSTNAME_GLOBAL, "result": ultimo_resultado}
             response = requests.post(f"{URL_BASE}/api/command", json=cmd_data, timeout=10)
-            ultimo_resultado = ""
+            
+            ultimo_resultado = ""  # Limpa o resultado enviado
             
             if response.status_code == 200:
                 command = response.json().get("command", "").strip()
@@ -208,6 +228,7 @@ while True:
             print("❌ Erro ao consultar fila de comandos do painel:", e)
             command = ""
 
+        # Processamento das ações recebidas do painel
         if command:
             try:
                 if command.startswith("mouse_move"):
@@ -246,7 +267,7 @@ while True:
     except Exception as e:
         print("❌ ERRO INTERNO NO LOOP:", e)
 
-    # Varredura a cada 120 segundos
+    # 💡 GATILHO TEMPORAL: Realiza o scan ICMP a cada 120 segundos (2 minutos)
     if time.time() - ultimo_scan_rede > 120:
         try:
             realizar_varredura_icmp()
@@ -254,4 +275,5 @@ while True:
             print("❌ Erro ao rodar varredura de rede:", e)
         ultimo_scan_rede = time.time()
 
+    # Intervalo regulado em 5 segundos para manter a consistência e estabilidade
     time.sleep(5)
