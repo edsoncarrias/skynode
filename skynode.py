@@ -411,7 +411,25 @@ def login():
             
     return render_template('login.html')
 
+@app.route("/dashboard")
 def dashboard():
+    if "username" not in session:
+        return redirect(url_for("login"))
+        
+    try:
+        lista_dispositivos = serialize_devices()
+    except Exception as e:
+        print(f"❌ Erro ao carregar dispositivos no painel: {e}")
+        lista_dispositivos = []
+
+    user_role = session.get("role", "tecnico")
+
+    return render_template(
+        "dashboard.html", 
+        user=session["username"], 
+        role=user_role, 
+        devices=lista_dispositivos
+    )
 
 @app.route("/api/devices")
 def api_devices():
@@ -463,12 +481,6 @@ def obter_metricas_dispositivo(hostname):
         
         if dado:
             dado_dict = dict(dado)
-            if dado_dict.get('created_at'):
-                try:
-                    if isinstance(dado_dict['created_at'], str):
-                        pass 
-                except:
-                    dado_dict['created_at'] = str(dado_dict['created_at'])
             return jsonify(dado_dict)
             
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0})
@@ -489,7 +501,7 @@ def device_details(hostname):
     if not selected_device:
         return "Dispositivo não encontrado", 404
         
-    return render_template("device_details.html", device=selected_device, screenshot=f"{hostname}.png", user=session["user"], role=session["role"])
+    return render_template("device_details.html", device=selected_device, screenshot=f"{hostname}.png", user=session["username"], role=session["role"])
 
 @app.route("/monitor/<hostname>")
 def monitor(hostname):
@@ -498,19 +510,19 @@ def monitor(hostname):
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
         return "Dispositivo não encontrado", 404
-    return render_template("monitor.html", device=selected_device, user=session["user"], role=session["role"])
+    return render_template("monitor.html", device=selected_device, user=session["username"], role=session["role"])
 
 @app.route("/terminal/<hostname>")
 def terminal(hostname):
     if "username" not in session:
         return redirect(url_for("login"))
-    return render_template("terminal.html", hostname=hostname, user=session["user"], role=session["role"])
+    return render_template("terminal.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/viewer/<hostname>")
 def viewer(hostname):
     if "username" not in session:
         return redirect(url_for("login"))
-    return render_template("viewer.html", hostname=hostname, user=session["user"], role=session["role"])
+    return render_template("viewer.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/api/terminal/<hostname>", methods=["POST"])
 def api_terminal(hostname):
@@ -590,7 +602,7 @@ def lista_usuarios():
             "email": u["email"],
             "role": u["role"]
         })
-    return render_template('users.html', user=session["user"], role=session["role"], users_list=lista_formatada)
+    return render_template('users.html', user=session["username"], role=session["role"], users_list=lista_formatada)
 
 @app.route('/add_user', methods=['POST'])
 def add_user():
@@ -644,165 +656,34 @@ def delete_user(username):
 def notepad():
     if "username" not in session:
         return redirect(url_for("login"))
-    return render_template("notepad.html", user=session["user"], role=session["role"])
+    return render_template("notepad.html", user=session["username"], role=session["role"])
 
 @app.route("/alerts")
 def alerts_page():
     if "username" not in session:
         return redirect(url_for("login"))
-    return render_template("alerts.html", alerts=alerts, user=session["user"], role=session["role"])
-
-@app.route("/change_password", methods=["GET", "POST"])
-@app.route("/change_password", methods=["GET", "POST"])
-def change_password():
-    if "username" not in session:
-        return redirect(url_for("login"))
-
-    if request.method == "POST":
-        current_password = request.form["current_password"]
-        new_password = request.form["new_password"]
-        confirm_password = request.form["confirm_password"]
-
-        conn = connect_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=?", (session["username"],))
-        user = cursor.fetchone()
-
-        if not user or not check_password_hash(user[2], current_password):
-            flash("Senha atual incorreta!")
-        elif new_password != confirm_password:
-            flash("As senhas não coincidem!")
-        else:
-            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["username"]))
-            conn.commit()
-            flash("Senha alterada com sucesso!")
-            conn.close()
-            return redirect(url_for("dashboard"))
-        conn.close()
-
-    return render_template("change_password.html", user=session["username"], role=session["role"])
-# =========================================
-# CONFIGURAÇÃO DE E-MAIL (SMTP)
-# =========================================
-# Configure essas variáveis no painel da Render (Environment) para segurança
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER", "seu-email@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "sua-senha-de-app") 
-
-@app.route("/forgot-password", methods=["GET", "POST"])
-def forgot_password():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        email = request.form.get("email", "").strip()
-        
-        if not username or not email:
-            flash("Por favor, preencha o usuário e o e-mail!")
-            return render_template("forgot_password.html")
-            
-        conn = connect_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=? AND email=?", (username, email))
-        user = cursor.fetchone()
-        
-        if user:
-            # Gerar uma senha temporária aleatória de 8 caracteres
-            temp_password = str(uuid.uuid4())[:8]
-            hashed_password = generate_password_hash(temp_password)
-            
-            # Atualizar no banco de dados
-            cursor.execute("UPDATE users SET password=? WHERE username=?", (hashed_password, username))
-            conn.commit()
-            conn.close()
-            
-            # Enviar o e-mail
-            try:
-                msg = MIMEMultipart()
-                msg['From'] = SMTP_USER
-                msg['To'] = email
-                msg['Subject'] = "SkyNode - Recuperação de Senha"
-                
-                corpo = f"""
-                <h2>Olá, {username}!</h2>
-                <p>Uma solicitação de recuperação de senha foi feita para a sua conta no SkyNode.</p>
-                <p>Sua nova senha temporária é: <strong>{temp_password}</strong></p>
-                <p>Recomendamos que você faça login e altere sua senha imediatamente na aba de configurações.</p>
-                <br>
-                <p><em>Este é um e-mail automático, por favor não responda.</em></p>
-                """
-                msg.attach(MIMEText(corpo, 'html'))
-                
-                # Conexão segura com o servidor SMTP
-                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.sendmail(SMTP_USER, email, msg.as_string())
-                server.quit()
-                
-                flash("Uma nova senha temporária foi enviada para o seu e-mail!")
-                return redirect(url_for("login"))
-                
-            except Exception as e:
-                print(f"❌ Erro ao enviar e-mail: {e}")
-                flash("Erro técnico ao enviar o e-mail. Contate o administrador.")
-                return render_template("forgot_password.html")
-        else:
-            conn.close()
-            flash("Usuário ou e-mail não encontrados no sistema!")
-            
-    return render_template("forgot_password.html")
-
-#######################################################
+    return render_template("alerts.html", alerts=alerts, user=session["username"], role=session["role"])
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
 
-@app.route("/secret-reset-admin")
-def secret_reset_admin():
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-        cursor.execute("DROP TABLE IF EXISTS users")
-        cursor.execute("""
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL,
-                email TEXT
-            )
-        """)
-        nova_senha_hash = generate_password_hash("admin123")
-        cursor.execute(
-            "INSERT INTO users (username, password, role, email) VALUES (?, ?, ?, ?)",
-            ("admin", nova_senha_hash, "admin", "admin@skynode.com")
-        )
-        conn.commit()
-        conn.close()
-        return "SUCESSO: Usuário 'admin' resetado para 'admin123'!", 200
-    except Exception as e:
-        return f"Erro ao resetar: {str(e)}", 500
-    
 @app.route('/download-agent')
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     downloads_path = os.path.join(base_dir, 'downloads')
-    
-    # Cria a pasta em tempo de execução se ela não existir, impedindo o crash
     os.makedirs(downloads_path, exist_ok=True)
     
     agent_path = os.path.join(downloads_path, 'agent.exe')
     config_path = os.path.join(downloads_path, 'config.ini')
     
-    # Se os arquivos não existirem, avisa sem derrubar o servidor python
     if not os.path.exists(agent_path) or not os.path.exists(config_path):
         try:
             arquivos_reais = os.listdir(downloads_path)
         except Exception:
             arquivos_reais = "Erro ao listar diretório"
-        return f"Erro: Arquivos do agente (agent.exe / config.ini) nao foram encontrados na pasta downloads. Arquivos na pasta: {arquivos_reais}", 404
+        return f"Erro: Arquivos do agente não encontrados na pasta downloads. Conteúdo atual: {arquivos_reais}", 404
 
     try:
         memory_file = io.BytesIO()
@@ -822,13 +703,13 @@ def download_agent():
     
 @app.route("/mapa")
 def pagina_mapa():
-    if "user" not in session:
+    if "username" not in session:
         return redirect("/login")
-    return render_template("mapa_rede.html", user=session["user"], role=session["role"])
+    return render_template("mapa_rede.html", user=session["username"], role=session["role"])
 
 @app.route("/api/mapa/dados")
 def api_mapa_dados():
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "unauthorized"}), 401
         
     dispositivos_cadastrados = []
@@ -860,7 +741,7 @@ def checar_ip_individual(ip):
 
 @app.route("/api/descoberta/scan")
 def api_descoberta_scan():
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "unauthorized"}), 401
 
     subrede = request.args.get("subrede", "").strip()
@@ -881,7 +762,7 @@ def api_descoberta_scan():
 
 @app.route("/api/dispositivos/adicionar", methods=["POST"])
 def api_adicionar_descoberto():
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "unauthorized"}), 401
     
     data = request.json or {}
@@ -891,65 +772,21 @@ def api_adicionar_descoberto():
     if not hostname or not ip:
         return jsonify({"error": "Dados incompletos"}), 400
     
-    conn = None
     try:
         conn = connect_db()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT id FROM dispositivos WHERE ip = ?", (ip,))
         if cursor.fetchone():
+            conn.close()
             return jsonify({"success": False, "error": "Este dispositivo já está cadastrado!"}), 400
             
-        cursor.execute(
-            "INSERT INTO dispositivos (hostname, ip, status) VALUES (?, ?, 'online')", 
-            (hostname, ip)
-        )
+        cursor.execute("INSERT INTO dispositivos (hostname, ip, status) VALUES (?, ?, 'online')", (hostname, ip))
         conn.commit()
+        conn.close()
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"error": f"Erro no banco de dados: {str(e)}"}), 500
-    finally:
-        if conn:
-            conn.close()
-
-@app.route('/<pagina>')
-def carregar_pagina_coringa(pagina):
-    if "user" not in session:
-        return redirect(url_for("login"))
-
-    paginas_menu = ['dispositivos', 'dispositivo', 'monitoramento', 'configuracoes', 'configuracao', 'mapa']
-    if pagina in paginas_menu:
-        pasta_templates = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
-        if os.path.exists(pasta_templates):
-            arquivos_reais = os.listdir(pasta_templates)
-            if f"{pagina}.html" in arquivos_reais:
-                return render_template(f"{pagina}.html", user=session["user"], role=session["role"], devices=serialize_devices())
-    return "Rota não mapeada no menu", 404
-
-@app.route("/api/processos/<hostname>", methods=["GET"])
-def api_processos(hostname):
-    if "user" not in session:
-        return jsonify({"error": "unauthorized"}), 401
-
-    terminal_results[hostname] = ""
-    commands[hostname] = "get_processes"
-
-    timeout, start = 15, time.time()
-    while time.time() - start < timeout:
-        if terminal_results.get(hostname):
-            break
-        time.sleep(0.5)
-    return jsonify({"processos": terminal_results.get(hostname, "Sem resposta do agente")})
-
-@app.after_request
-def add_header(response):
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
-    # Pega a porta automaticamente da Render ou usa a 5000 localmente
     port = int(os.environ.get("PORT", 5000))
-    # Roda o servidor usando o motor do SocketIO diretamente
     socketio.run(app, host="0.0.0.0", port=port, debug=False)
