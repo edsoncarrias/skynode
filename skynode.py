@@ -366,34 +366,47 @@ def api_processar_comando():
 # ROTAS FLASK (INTERFACE)
 # =========================================
 
-@app.route("/", methods=["GET", "POST"])
+@app.route('/', methods=['GET', 'POST'])  # Se a sua rota for '/login', mude aqui
 def login():
-    if request.method == "POST":
-        username = request.form.get("username") or request.form.get("user") or request.form.get("login")
-        password = request.form.get("password") or request.form.get("senha")
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
         
         if not username or not password:
-            flash("Preencha todos os campos!")
-            return render_template("login.html")
+            flash("Por favor, preencha todos os campos!")
+            return render_template('login.html')
             
-        username = username.strip()
-        
         conn = connect_db()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        
+        # Busca o usuário no banco
+        cursor.execute("SELECT id, username, password, role FROM users WHERE username = ?", (username,))
         user = cursor.fetchone()
         conn.close()
-
+        
+        # Se encontrou o usuário
         if user:
-            user_dict = dict(user)
-            if check_password_hash(user_dict["password"], password):
-                session["user"] = user_dict["username"]
-                session["role"] = user_dict["role"]
-                return redirect(url_for("dashboard"))
+            # Como usamos SQLite puro, o fetchone() retorna uma tupla:
+            # user[0] é o ID, user[1] é o username, user[2] é a senha (hash), user[3] é o cargo
+            db_password_hash = user[2]
             
-        flash("Usuário ou senha inválidos!")
-    return render_template("login.html")
+            # Faz a checagem segura do hash da senha
+            if check_password_hash(db_password_hash, password):
+                # Guarda as informações do usuário na sessão do Flask
+                session['user_id'] = user[0]
+                session['username'] = user[1]
+                session['role'] = user[3]
+                
+                print(f"✅ Usuário {username} logado com sucesso!")
+                return redirect(url_for('dashboard')) # Mude para o nome da sua rota de destino (ex: 'index' ou 'dashboard')
+            else:
+                print("❌ Senha incorreta!")
+                flash("Usuário ou senha incorretos!")
+        else:
+            print("❌ Usuário não encontrado!")
+            flash("Usuário ou senha incorretos!")
+            
+    return render_template('login.html')
 
 @app.route("/dashboard")
 def dashboard():
