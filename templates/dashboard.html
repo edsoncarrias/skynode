@@ -125,29 +125,35 @@
             <img src="{{ url_for('static', filename='img/logo.png') }}" class="logo-img">
         </div>
 
-       
         <hr style="border-color: #1e293b;">
 
         <div class="menu">
             <a href="/dashboard">
                 <div class="menu-item" style="background: #1e293b; color: #38bdf8 !important;">🏠 Dashboard</div>
             </a>
-           <a href="/Dispositivos">
+            
+            <a href="/dashboard">
                 <div class="menu-item">🖥️ Dispositivos</div>
             </a>
-            <a href="/mapa"><div class="menu-item">🗺️ Mapa da Rede</div></a>
+            
+            <a href="/mapa">
+                <div class="menu-item">🗺️ Mapa de Rede</div>
+            </a>
 
-            <a href="/Monitoramento">
+            <a href="/alerts">
                 <div class="menu-item">📊 Monitoramento</div>
             </a>
-            <a href="/Configurações">
+            
+            <a href="/change_password">
                 <div class="menu-item">⚙️ Configurações</div>
             </a>
-                <div style="margin: 20px 0; text-align: center;">
-            <a href="/download-agent" class="btn btn-primary" style="padding: 12px 24px; background-color: #1e293b; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                📥 Baixar Agente Automatizado (.ZIP)
-            </a>
+            
+            <div style="margin: 20px 0; text-align: center;">
+                <a href="/download-agent" class="btn btn-primary" style="padding: 12px 24px; background-color: #1e293b; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    📥 Baixar Agente Automatizado (.ZIP)
+                </a>
             </div>
+            
             {% if role == "admin" %}
             <a href="/users">
                 <div class="menu-item">👥 Usuários</div>
@@ -281,17 +287,12 @@
         }
 
         function updateDashboard(devices){
-            // 1. Atualiza contador online
             let online = 0;
             devices.forEach(device => {
                 if(device.status === "online") online++;
             });
             if(onlineCount) onlineCount.innerHTML = online;
-
-            // 2. Atualiza os gráficos
             renderCharts(devices);
-
-            // 3. Atualiza contador de alertas
             updateAlertCount();
         }
 
@@ -305,7 +306,6 @@
 
         socket.on("devices_update", function(devices){ updateDashboard(devices); });
 
-        // Inicializa o painel
         fetchDevices();
         setInterval(fetchDevices, 3000);
     </script>
