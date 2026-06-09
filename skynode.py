@@ -412,6 +412,7 @@ def login():
     return render_template('login.html')
 
 @app.route("/dashboard")
+@app.route("/dashboard/") # Aceita com barra no final
 def dashboard():
     if "username" not in session:
         return redirect(url_for("login"))
@@ -584,6 +585,7 @@ def send_command(hostname, command):
     })
 
 @app.route('/users')
+@app.route('/users/') # Aceita com barra no final
 def lista_usuarios():
     if "username" not in session:
         return redirect(url_for("login"))
@@ -653,12 +655,14 @@ def delete_user(username):
         return f"<h3>Erro ao excluir usuário:</h3><p>{e}</p><a href='/users'>Voltar</a>", 500
 
 @app.route("/notepad")
+@app.route("/notepad/") # Aceita com barra no final
 def notepad():
     if "username" not in session:
         return redirect(url_for("login"))
     return render_template("notepad.html", user=session["username"], role=session["role"])
 
 @app.route("/alerts")
+@app.route("/alerts/") # Aceita com barra no final
 def alerts_page():
     if "username" not in session:
         return redirect(url_for("login"))
