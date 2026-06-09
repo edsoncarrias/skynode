@@ -950,4 +950,7 @@ def add_header(response):
     return response
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    # Pega a porta automaticamente da Render ou usa a 5000 localmente
+    port = int(os.environ.get("PORT", 5000))
+    # Roda o servidor usando o motor do SocketIO diretamente
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)
