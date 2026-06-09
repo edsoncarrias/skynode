@@ -1,204 +1,54 @@
 import os
-import io
-import time
-import json
-import uuid
-import socket
 import sqlite3
+import time
+import io
 import zipfile
-import platform
-import threading
-import requests
 import subprocess
-from werkzeug.security import generate_password_hash
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
-# Flask e suas extensões reunidos em blocos únicos
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify, send_file, abort
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
 from werkzeug.security import generate_password_hash, check_password_hash
+from concurrent.futures import ThreadPoolExecutor
 from ping3 import ping
 
-# 🚨 REGRAS DE ALERTA DO SKYNODE (Thresholds)
-
-LIMITE_CPU = 50.0  # Se a CPU passar de 50%, dispara
-LIMITE_RAM = 60.0  # Se a RAM passar de 60%, dispara
-
-def verificar_limites_RMM(dispositivo):
-    hostname = dispositivo.get("hostname", "Desconhecido")
-    try:
-        cpu = float(dispositivo.get("cpu", 0))
-        ram = float(dispositivo.get("ram", 0))
-    except (ValueError, TypeError):
-        return
-
-    print(f"DEBUG: Testando {hostname} -> CPU: {cpu}% | RAM: {ram}%")
-
-    if cpu > LIMITE_CPU:
-        print(f"\n🔥 [ALERTA CRÍTICO] - O dispositivo '{hostname}' está com uso de CPU alto: {cpu}%!")
-
-    if ram > LIMITE_RAM:
-        print(f"\n🧠 [ALERTA ATENÇÃO] - O dispositivo '{hostname}' está com uso de RAM alto: {ram}%!\n")
-
-# =========================================
-# DIAGNÓSTICO DE ALERTAS (OLLAMA REMOVIDO)
-# =========================================
-def ai_analyze_alert(message):
-    # Retorno padrão limpo para manter a compatibilidade do sistema sem IA externa
-    explanation = f"Alerta detectado no sistema: {message}."
-    suggested_command = "echo 'Analise automatica desativada'"
-    return explanation, suggested_command
-
-# =========================================
-# TELEGRAM CONFIG
-# =========================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-def send_telegram_alert(message):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
-        response = requests.post(url, json=payload, timeout=10)
-        print("📨 Telegram:", response.status_code)
-    except Exception as e:
-        print("❌ Telegram erro:", e)
-
-# =========================================
-# APP CONFIG
-# =========================================
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "skynode_secret")
 
-# Mude async_mode para "eventlet" para alinhar com o Gunicorn da Render
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*"
-)
+# CONFIGURAÇÃO CRUCIAL: Chave secreta fixa para manter você logado na Render
+app.secret_key = "CHAVE_MEGA_SEGURA_E_FIXA_DO_SKYNODE_2026"
 
-# =========================================
-# PATHS E DIRETÓRIOS
-# =========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
-DATABASE = os.path.join(DATABASE_FOLDER, "skynode.db")
-SCREENSHOT_FOLDER = os.path.join(BASE_DIR, "static", "screenshots")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
-os.makedirs(DATABASE_FOLDER, exist_ok=True)
+DATABASE = "skynode.db"
+SCREENSHOT_FOLDER = "screenshots"
 os.makedirs(SCREENSHOT_FOLDER, exist_ok=True)
 
-# =========================================
-# MEMÓRIA GLOBAL
-# =========================================
+# Variaveis globais de controle
 devices = []
+alerts = []
 commands = {}
 terminal_results = {}
-alerts = []  
-alert_cooldown = {}
 
-# =========================================
-# LÓGICA DE ALERTAS
-# =========================================
-def add_alert(hostname, message):
-    timestamp = time.strftime("%H:%M:%S")
-    alert_id = str(uuid.uuid4())[:8]
-    
-    ai_explanation, ai_command = ai_analyze_alert(message)
-    
-    alert_data = {
-        "id": alert_id,
-        "hostname": hostname,
-        "text": f"[{timestamp}] {message}",
-        "ai_analysis": ai_explanation,
-        "ai_command": ai_command,
-        "timestamp": timestamp
-    }
-    
-    alerts.append(alert_data)
-    if len(alerts) > 100:
-        alerts.pop(0)
-
-    print(f"🚨 Alerta: {alert_data['text']}")
-    print(f"🛠️ DIAGNÓSTICO: {alert_data['ai_analysis']}")
-
-    socketio.emit("new_alert", alert_data)
-    send_telegram_alert(f"{alert_data['text']}\n\n🛠️ Diagnóstico: {ai_explanation}")
-
-def check_alerts(device):
-    hostname = device.get("hostname", "unknown")
-    try:
-        cpu = float(device.get("cpu", 0))
-        ram = float(device.get("ram", 0))
-        disk = float(device.get("disk", 0))
-        ping_val = float(device.get("ping", 0))
-    except:
-        return
-        
-    status = get_device_status(device)
-    now = time.time()
-    cooldown = 300  
-
-    def can_alert(key):
-        last = alert_cooldown.get(key, 0)
-        if now - last >= cooldown:
-            alert_cooldown[key] = now
-            return True
-        return False
-
-    if cpu >= 90 and can_alert(f"{hostname}_cpu"):
-        add_alert(hostname, f"🔥 CPU alta: {cpu}%")
-
-    if ram >= 85 and can_alert(f"{hostname}_ram"):
-        add_alert(hostname, f"🧠 RAM alta: {ram}%")
-
-    if disk >= 90 and can_alert(f"{hostname}_disk"):
-        add_alert(hostname, f"💽 Disco cheio: {disk}%")
-
-    if ping_val >= 150 and can_alert(f"{hostname}_ping"):
-        add_alert(hostname, f"📶 Latência alta: {ping_val} ms")
-
-    if status == "offline" and can_alert(f"{hostname}_offline"):
-        add_alert(hostname, "⚫ Dispositivo Offline")
-
-# =========================================
-# BANCO DE DADOS (CENTRALIZADO - SQLITE CORRIGIDO)
-# =========================================
 def connect_db():
-    conn = sqlite3.connect(DATABASE, check_same_thread=False)
-    return conn
+    return sqlite3.connect(DATABASE)
 
 def create_database():
-    # CORRIGIDO: Aponta para o caminho oficial do banco configurado no seu app
-    if os.path.exists(DATABASE):
-        try:
-            os.remove(DATABASE)
-            print("-> Banco de dados antigo deletado para limpeza de cache de login.")
-        except Exception as e:
-            print(f"-> Erro ao deletar banco antigo: {e}")
-
+    # O banco de dados NÃO é mais deletado automaticamente para não sumir com os dados na Render
     conn = connect_db()
     cursor = conn.cursor()
     
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'tecnico',
-            email TEXT
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        email TEXT,
+        role TEXT NOT NULL
+    )
     """)
     
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hostname TEXT,
+        hostname TEXT NOT NULL,
         cpu REAL,
         ram REAL,
         disk REAL,
@@ -206,72 +56,41 @@ def create_database():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
-
+    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS dispositivos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hostname TEXT UNIQUE NOT NULL,
-        ip TEXT NOT NULL,
-        status TEXT DEFAULT 'offline'
+        hostname TEXT NOT NULL,
+        ip TEXT UNIQUE NOT NULL,
+        status TEXT NOT NULL
     )
     """)
-    conn.commit()
     
-    admin_password = generate_password_hash("admin123")
-    
-    try:
-        cursor.execute("""
-            INSERT INTO users (username, password, role, email) 
-            VALUES (?, ?, ?, ?)
-        """, ("admin", admin_password, "admin", "admin@skynode.com"))
+    # Garante que o usuário admin padrão exista com a senha correta
+    cursor.execute("SELECT * FROM users WHERE username='admin'")
+    if not cursor.fetchone():
+        hashed_pw = generate_password_hash("admin123")
+        cursor.execute("INSERT INTO users (username, password, email, role) VALUES ('admin', ?, 'admin@skynode.com', 'admin')", (hashed_pw,))
         conn.commit()
-        print("✅ NOVO BANCO DE DADOS CRIADO! Admin padrão configurado: admin / admin123")
-    except Exception as e:
-        print(f"❌ Erro ao inserir admin: {e}")
         
     conn.close()
-    # =========================================
-    #FIM DATA BASE
-    # =========================================
-
-def save_metrics(device):
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-        cursor.execute("""
-        INSERT INTO metrics (hostname, cpu, ram, disk, ping)
-        VALUES (?, ?, ?, ?, ?)
-        """, (
-            device.get("hostname"),
-            device.get("cpu", 0),
-            device.get("ram", 0),
-            device.get("disk", 0),
-            device.get("ping", 0)
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print("❌ Erro save metrics:", e)
 
 create_database()
 
-# =========================================
-# CONTROLE DE ESTADO DOS DISPOSITIVOS
-# =========================================
 def get_device_status(device):
-    return "online" if (time.time() - device.get("last_seen", 0)) <= 120 else "offline"
+    last_seen = device.get('last_seen', 0)
+    if time.time() - last_seen < 15:
+        return "online"
+    return "offline"
 
 def serialize_devices():
     updated_devices = []
     global devices
-    
-    # Se a lista estiver vazia (sistema acabou de resetar), retorna uma lista vazia com segurança
     if not devices:
         return updated_devices
         
     for device in devices:
         try:
-            # Protege contra campos ausentes usando o .get() com valores padrão seguros
             updated_devices.append({
                 "hostname": device.get("hostname", "N/A"),
                 "system": device.get("system", "N/A"),
@@ -285,137 +104,41 @@ def serialize_devices():
                 "ip": device.get("ip", "")
             })
         except Exception as e:
-            print(f"⚠️ Erro ao serializar dispositivo individual: {e}")
+            print(f"⚠️ Erro ao serializar dispositivo: {e}")
             continue
-            
     return updated_devices
-# ====================================================================
-# ROTAS HTTP (APIs DO AGENTE)
-# ====================================================================
 
-@app.route("/api/status", methods=["GET", "POST"])
-@app.route("/api/status/", methods=["GET", "POST"])
-def api_receber_status():
-    if request.method == "GET":
-        return jsonify({"status": "sucesso", "message": "API operacional. Use POST para enviar dados."}), 200
-        
-    try:
-        dados = request.get_json(force=True, silent=True)
-        if not dados:
-            return jsonify({"status": "erro", "message": "Sem dados ou JSON inválido"}), 400
-            
-        hostname = dados.get("hostname")
-        if not hostname:
-            return jsonify({"status": "erro", "message": "Hostname ausente"}), 400
-            
-        dados["last_seen"] = time.time()
-        dados["ip"] = request.remote_addr
-        dados["status"] = "online"
-        
-        global devices
-        devices = [d for d in devices if d.get("hostname") != hostname]
-        devices.append(dados)
-        
-        save_metrics(dados)
-        check_alerts(dados)
-        
-        socketio.emit("devices_update", serialize_devices())
-        return jsonify({"status": "sucesso"}), 200
-    except Exception as e:
-        return jsonify({"status": "erro", "message": str(e)}), 500
+# ==========================================
+# ROTAS FLASK - INTERFACE PRINCIPAL
+# ==========================================
 
-@app.route("/api/screenshot", methods=["GET", "POST"])
-@app.route("/api/screenshot/", methods=["GET", "POST"])
-def api_receber_screenshot():
-    if request.method == "GET":
-        return jsonify({"status": "erro", "message": "Use POST para upload de arquivos"}), 200
-        
-    try:
-        hostname = request.form.get("hostname")
-        file = request.files.get("screenshot")
-        
-        if hostname and file:
-            caminho_foto = os.path.join(SCREENSHOT_FOLDER, f"{hostname}.png")
-            file.save(caminho_foto)
-            return jsonify({"status": "sucesso"}), 200
-            
-        return jsonify({"status": "erro", "message": "Dados ou arquivos incompletos"}), 400
-    except Exception as e:
-        return jsonify({"status": "erro", "message": str(e)}), 500
-
-@app.route("/api/command", methods=["GET", "POST"])
-@app.route("/api/command/", methods=["GET", "POST"])
-def api_processar_comando():
-    try:
-        dados = request.get_json(force=True, silent=True)
-        hostname = dados.get("hostname") if dados else request.args.get("hostname")
-        
-        if not hostname:
-            return jsonify({"command": "echo 'Sem hostname'"}), 200
-            
-        if dados and "output" in dados:
-            terminal_results[hostname] = dados.get("output")
-            
-        command = commands.get(hostname, "")
-        if command:
-            commands[hostname] = ""
-            return jsonify({"command": command}), 200
-            
-        return jsonify({"command": "echo online"}), 200
-    except Exception as e:
-        return jsonify({"command": f"echo 'Erro no servidor: {str(e)}'"}), 200
-
-# =========================================
-# ROTAS FLASK (INTERFACE)
-# =========================================
-
-@app.route('/', methods=['GET', 'POST'])  # Se a sua rota for '/login', mude aqui
+@app.route('/', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET', 'POST'])  # Correção: Aceita ambas as URLs para evitar 404
 def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
-        
-        if not username or not password:
-            flash("Por favor, preencha todos os campos!")
-            return render_template('login.html')
-            
+        password = request.form.get('password', '')
+
         conn = connect_db()
         cursor = conn.cursor()
-        
-        # Busca o usuário no banco
-        cursor.execute("SELECT id, username, password, role FROM users WHERE username = ?", (username,))
-        user = cursor.fetchone()
+        cursor.execute("SELECT password, role FROM users WHERE username=?", (username,))
+        row = cursor.fetchone()
         conn.close()
-        
-        # Se encontrou o usuário
-        if user:
-            # Como usamos SQLite puro, o fetchone() retorna uma tupla:
-            # user[0] é o ID, user[1] é o username, user[2] é a senha (hash), user[3] é o cargo
-            db_password_hash = user[2]
-            
-            # Faz a checagem segura do hash da senha
-            if check_password_hash(db_password_hash, password):
-                # Guarda as informações do usuário na sessão do Flask
-                session['user_id'] = user[0]
-                session['username'] = user[1]
-                session['role'] = user[3]
-                
-                print(f"✅ Usuário {username} logado com sucesso!")
-                return redirect('/dashboard') # Mude para o nome da sua rota de destino (ex: 'index' ou 'dashboard')
-            else:
-                print("❌ Senha incorreta!")
-                flash("Usuário ou senha incorretos!")
+
+        if row and check_password_hash(row[0], password):
+            session['username'] = username  # Padronizado para username
+            session['role'] = row[1]
+            return redirect('/dashboard')
         else:
-            print("❌ Usuário não encontrado!")
             flash("Usuário ou senha incorretos!")
             
     return render_template('login.html')
 
 @app.route("/dashboard")
-@app.route("/dashboard/") # Aceita com barra no final
+@app.route("/dashboard/")
 def dashboard():
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
         
     try:
         lista_dispositivos = serialize_devices()
@@ -424,13 +147,145 @@ def dashboard():
         lista_dispositivos = []
 
     user_role = session.get("role", "tecnico")
+    return render_template("dashboard.html", user=session["username"], role=user_role, devices=lista_dispositivos)
 
-    return render_template(
-        "dashboard.html", 
-        user=session["username"], 
-        role=user_role, 
-        devices=lista_dispositivos
-    )
+@app.route("/change_password", methods=["GET", "POST"])
+@app.route("/change_password/", methods=["GET", "POST"])
+def change_password():
+    if "username" not in session:
+        return redirect("/login")
+
+    if request.method == "POST":
+        current_password = request.form["current_password"]
+        new_password = request.form["new_password"]
+        confirm_password = request.form["confirm_password"]
+
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=?", (session["username"],))
+        user = cursor.fetchone()
+
+        if not user or not check_password_hash(user[2], current_password):
+            flash("Senha atual incorreta!")
+        elif new_password != confirm_password:
+            flash("As senhas não coincidem!")
+        else:
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["username"]))
+            conn.commit()
+            flash("Senha alterada com sucesso!")
+            conn.close()
+            return redirect("/dashboard")
+        conn.close()
+
+    return render_template("change_password.html", user=session["username"], role=session["role"])
+
+@app.route('/users')
+@app.route('/users/')
+def lista_usuarios():
+    if "username" not in session:
+        return redirect("/login")
+    
+    conn = connect_db()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, email, role FROM users")
+    usuarios_do_banco = cursor.fetchall()
+    conn.close()
+
+    lista_formatada = []
+    for u in usuarios_do_banco:
+        lista_formatada.append({
+            "username": u["username"],
+            "email": u["email"],
+            "role": u["role"]
+        })
+    return render_template('users.html', user=session["username"], role=session["role"], users_list=lista_formatada)
+
+@app.route('/add_user', methods=['POST'])
+def add_user():
+    if "username" not in session:
+        return redirect("/login")
+        
+    username = request.form.get('username') or request.form.get('user')
+    email = request.form.get('email')
+    password = request.form.get('password') or request.form.get('senha')
+    role = request.form.get('role') or 'tecnico'
+
+    if not username or not password:
+        flash("Erro: Campos obrigatórios ausentes!")
+        return redirect('/users')
+
+    username = username.strip()
+    hashed_password = generate_password_hash(password)
+    
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)", (username, email, hashed_password, role))
+        conn.commit()
+    except Exception as e:
+        print(f"Erro ao inserir usuario: {e}")
+    finally:
+        conn.close()
+        
+    return redirect('/users')
+
+@app.route('/delete_user/<username>')
+def delete_user(username):
+    if "username" not in session:
+        return redirect("/login")
+        
+    if username == "admin":
+        return redirect('/users')
+    try:
+        with connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users WHERE username=?", (username,))
+            conn.commit()
+        return redirect('/users')
+    except Exception as e:
+        return f"<h3>Erro ao excluir usuário:</h3><p>{e}</p><a href='/users'>Voltar</a>", 500
+
+@app.route("/notepad")
+@app.route("/notepad/")
+def notepad():
+    if "username" not in session:
+        return redirect("/login")
+    return render_template("notepad.html", user=session["username"], role=session["role"])
+
+@app.route("/alerts")
+@app.route("/alerts/")
+def alerts_page():
+    if "username" not in session:
+        return redirect("/login")
+    return render_template("alerts.html", alerts=alerts, user=session["username"], role=session["role"])
+
+@app.route("/mapa")
+@app.route("/mapa/")
+def pagina_mapa():
+    if "username" not in session:
+        return redirect("/login")
+    return render_template("mapa_rede.html", user=session["username"], role=session["role"])
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+# ROTA SECRETA DE EMERGÊNCIA (Se der 404, use para testar a vida do app)
+@app.route("/secret-reset-admin")
+def secret_reset_admin():
+    conn = connect_db()
+    cursor = conn.cursor()
+    hashed_pw = generate_password_hash("admin123")
+    cursor.execute("INSERT OR REPLACE INTO users (username, password, email, role) VALUES ('admin', ?, 'admin@skynode.com', 'admin')", (hashed_pw,))
+    conn.commit()
+    conn.close()
+    return "SUCESSO: Usuário 'admin' resetado para 'admin123'!"
+
+# ==========================================
+# ROTAS DE API E AGENTES
+# ==========================================
 
 @app.route("/api/devices")
 def api_devices():
@@ -464,26 +319,17 @@ def execute_ai_command():
     })
 
 @app.route("/api/metrics/<hostname>")
-def obter_metricas_dispositivo(hostname):
+def obtener_metricas_dispositivo(hostname):
     try:
         conn = connect_db()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT cpu, ram, disk, ping, created_at 
-            FROM metrics 
-            WHERE hostname = ? 
-            ORDER BY id DESC LIMIT 1
-        """, (hostname,))
-        
+        cursor.execute("SELECT cpu, ram, disk, ping, created_at FROM metrics WHERE hostname = ? ORDER BY id DESC LIMIT 1", (hostname,))
         dado = cursor.fetchone()
         conn.close()
         
         if dado:
-            dado_dict = dict(dado)
-            return jsonify(dado_dict)
-            
+            return jsonify(dict(dado))
         return jsonify({"cpu": 0, "ram": 0, "disk": 0, "ping": 0})
     except Exception as e:
         print(f"❌ Erro ao buscar métricas: {e}")
@@ -496,7 +342,7 @@ def screenshots(filename):
 @app.route("/device/<hostname>")
 def device_details(hostname):
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
@@ -507,7 +353,7 @@ def device_details(hostname):
 @app.route("/monitor/<hostname>")
 def monitor(hostname):
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
         return "Dispositivo não encontrado", 404
@@ -516,13 +362,13 @@ def monitor(hostname):
 @app.route("/terminal/<hostname>")
 def terminal(hostname):
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
     return render_template("terminal.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/viewer/<hostname>")
 def viewer(hostname):
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
     return render_template("viewer.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/api/terminal/<hostname>", methods=["POST"])
@@ -548,7 +394,7 @@ def api_terminal(hostname):
 @app.route("/remote/<hostname>")
 def remote(hostname):
     if "username" not in session:
-        return redirect(url_for("login"))
+        return redirect("/login")
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
@@ -584,95 +430,6 @@ def send_command(hostname, command):
         "output": terminal_results.get(hostname, "Sem resposta")
     })
 
-@app.route('/users')
-@app.route('/users/') # Aceita com barra no final
-def lista_usuarios():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    
-    conn = connect_db()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, email, role FROM users")
-    usuarios_do_banco = cursor.fetchall()
-    conn.close()
-
-    lista_formatada = []
-    for u in usuarios_do_banco:
-        lista_formatada.append({
-            "username": u["username"],
-            "email": u["email"],
-            "role": u["role"]
-        })
-    return render_template('users.html', user=session["username"], role=session["role"], users_list=lista_formatada)
-
-@app.route('/add_user', methods=['POST'])
-def add_user():
-    if "username" not in session:
-        return redirect(url_for("login"))
-        
-    username = request.form.get('username') or request.form.get('user')
-    email = request.form.get('email')
-    password = request.form.get('password') or request.form.get('senha')
-    role = request.form.get('role') or 'tecnico'
-
-    if not username or not password:
-        flash("Erro: Campos obrigatórios ausentes!")
-        return redirect('/users')
-
-    username = username.strip()
-    hashed_password = generate_password_hash(password)
-    
-    conn = connect_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
-            (username, email, hashed_password, role)
-        )
-        conn.commit()
-    except Exception as e:
-        print(f"Erro ao inserir usuario: {e}")
-    finally:
-        conn.close()
-        
-    return redirect('/users')
-
-@app.route('/delete_user/<username>')
-def delete_user(username):
-    if "username" not in session:
-        return redirect(url_for("login"))
-        
-    if username == "admin":
-        return redirect('/users')
-    try:
-        with connect_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username=?", (username,))
-            conn.commit()
-        return redirect('/users')
-    except Exception as e:
-        return f"<h3>Erro ao excluir usuário:</h3><p>{e}</p><a href='/users'>Voltar</a>", 500
-
-@app.route("/notepad")
-@app.route("/notepad/") # Aceita com barra no final
-def notepad():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    return render_template("notepad.html", user=session["username"], role=session["role"])
-
-@app.route("/alerts")
-@app.route("/alerts/") # Aceita com barra no final
-def alerts_page():
-    if "username" not in session:
-        return redirect(url_for("login"))
-    return render_template("alerts.html", alerts=alerts, user=session["username"], role=session["role"])
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
 @app.route('/download-agent')
 def download_agent():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -696,20 +453,9 @@ def download_agent():
             zipf.write(config_path, 'config.ini')
                 
         memory_file.seek(0)
-        return send_file(
-            memory_file,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name='SkyNode_Agent.zip'
-        )
+        return send_file(memory_file, mimetype='application/zip', as_attachment=True, download_name='SkyNode_Agent.zip')
     except Exception as e:
         return f"Erro ao gerar o pacote ZIP: {str(e)}", 500
-    
-@app.route("/mapa")
-def pagina_mapa():
-    if "username" not in session:
-        return redirect("/login")
-    return render_template("mapa_rede.html", user=session["username"], role=session["role"])
 
 @app.route("/api/mapa/dados")
 def api_mapa_dados():
@@ -790,6 +536,63 @@ def api_adicionar_descoberto():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ==========================================
+# SOCKETIO - SESSÃO DOS AGENTES REAIS
+# ==========================================
+
+@socketio.on("connect")
+def handle_connect():
+    pass
+
+@socketio.on("register")
+def handle_register(data):
+    hostname = data.get("hostname")
+    if not hostname:
+        return
+    for d in devices:
+        if d["hostname"] == hostname:
+            d.update(data)
+            d["last_seen"] = time.time()
+            break
+    else:
+        data["last_seen"] = time.time()
+        devices.append(data)
+    emit("register_response", {"status": "success"})
+
+@socketio.on("update")
+def handle_update(data):
+    hostname = data.get("hostname")
+    if not hostname:
+        return
+    for d in devices:
+        if d["hostname"] == hostname:
+            d.update(data)
+            d["last_seen"] = time.time()
+            break
+            
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO metrics (hostname, cpu, ram, disk, ping) VALUES (?, ?, ?, ?, ?)",
+                       (hostname, data.get("cpu"), data.get("ram"), data.get("disk"), data.get("ping")))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print("Erro ao salvar métricas no banco:", e)
+
+    response = {}
+    if hostname in commands and commands[hostname]:
+        response["command"] = commands[hostname]
+        commands[hostname] = ""
+    emit("update_response", response)
+
+@socketio.on("terminal_response")
+def handle_terminal_response(data):
+    hostname = data.get("hostname")
+    output = data.get("output")
+    if hostname:
+        terminal_results[hostname] = output
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
