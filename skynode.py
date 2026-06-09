@@ -12,6 +12,9 @@ import requests
 import subprocess
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Flask e suas extensões reunidos em blocos únicos
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, jsonify, send_file, abort
@@ -174,7 +177,7 @@ def create_database():
     cursor = conn.cursor()
     
     # 1. Cria a tabela de usuários se não existir
-    
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -661,6 +664,79 @@ def change_password():
         conn.close()
 
     return render_template("change_password.html", user=session["user"], role=session["role"])
+
+# =========================================
+# CONFIGURAÇÃO DE E-MAIL (SMTP)
+# =========================================
+# Configure essas variáveis no painel da Render (Environment) para segurança
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USER = os.getenv("SMTP_USER", "seu-email@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "sua-senha-de-app") 
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip()
+        
+        if not username or not email:
+            flash("Por favor, preencha o usuário e o e-mail!")
+            return render_template("forgot_password.html")
+            
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=? AND email=?", (username, email))
+        user = cursor.fetchone()
+        
+        if user:
+            # Gerar uma senha temporária aleatória de 8 caracteres
+            temp_password = str(uuid.uuid4())[:8]
+            hashed_password = generate_password_hash(temp_password)
+            
+            # Atualizar no banco de dados
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (hashed_password, username))
+            conn.commit()
+            conn.close()
+            
+            # Enviar o e-mail
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = SMTP_USER
+                msg['To'] = email
+                msg['Subject'] = "SkyNode - Recuperação de Senha"
+                
+                corpo = f"""
+                <h2>Olá, {username}!</h2>
+                <p>Uma solicitação de recuperação de senha foi feita para a sua conta no SkyNode.</p>
+                <p>Sua nova senha temporária é: <strong>{temp_password}</strong></p>
+                <p>Recomendamos que você faça login e altere sua senha imediatamente na aba de configurações.</p>
+                <br>
+                <p><em>Este é um e-mail automático, por favor não responda.</em></p>
+                """
+                msg.attach(MIMEText(corpo, 'html'))
+                
+                # Conexão segura com o servidor SMTP
+                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.sendmail(SMTP_USER, email, msg.as_string())
+                server.quit()
+                
+                flash("Uma nova senha temporária foi enviada para o seu e-mail!")
+                return redirect(url_for("login"))
+                
+            except Exception as e:
+                print(f"❌ Erro ao enviar e-mail: {e}")
+                flash("Erro técnico ao enviar o e-mail. Contate o administrador.")
+                return render_template("forgot_password.html")
+        else:
+            conn.close()
+            flash("Usuário ou e-mail não encontrados no sistema!")
+            
+    return render_template("forgot_password.html")
+
+#######################################################
 
 @app.route("/logout")
 def logout():
