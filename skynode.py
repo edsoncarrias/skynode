@@ -174,13 +174,10 @@ def connect_db():
     return conn
 
 def create_database():
-    db_file = "skynode.db" # Verifique se o nome do seu arquivo de banco é exatamente este
-    
-    # FORÇA BRUTA: Se o banco estiver corrompido ou travado, deleta o arquivo físico para recriar limpo
-    # (Remova estas duas linhas depois que conseguir logar pela primeira vez se não quiser perder dados nos próximos deploys)
-    if os.path.exists(db_file):
+    # CORRIGIDO: Aponta para o caminho oficial do banco configurado no seu app
+    if os.path.exists(DATABASE):
         try:
-            os.remove(db_file)
+            os.remove(DATABASE)
             print("-> Banco de dados antigo deletado para limpeza de cache de login.")
         except Exception as e:
             print(f"-> Erro ao deletar banco antigo: {e}")
@@ -188,7 +185,6 @@ def create_database():
     conn = connect_db()
     cursor = conn.cursor()
     
-    # 1. Cria a tabela de usuários limpa
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,7 +195,6 @@ def create_database():
         )
     """)
     
-    # 2. Cria as tabelas de métricas e dispositivos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,10 +217,8 @@ def create_database():
     """)
     conn.commit()
     
-    # 3. Gera o Hash da senha usando o método padrão e seguro atual
     admin_password = generate_password_hash("admin123")
     
-    # 4. Insere o Admin garantindo que ele seja o ID 1 do banco limpo
     try:
         cursor.execute("""
             INSERT INTO users (username, password, role, email) 
@@ -237,7 +230,6 @@ def create_database():
         print(f"❌ Erro ao inserir admin: {e}")
         
     conn.close()
-
     # =========================================
     #FIM DATA BASE
     # =========================================
@@ -410,9 +402,10 @@ def login():
 
 @app.route("/dashboard")
 def dashboard():
-    if "user" not in session:
+    # CORRIGIDO: Agora checa o campo correto salvo na sessão
+    if "username" not in session:
         return redirect(url_for("login"))
-    return render_template("dashboard.html", user=session["user"], role=session["role"], devices=serialize_devices())
+    return render_template("dashboard.html", user=session["username"], role=session["role"], devices=serialize_devices())
 
 @app.route("/api/devices")
 def api_devices():
@@ -424,7 +417,7 @@ def api_alerts():
 
 @app.route("/api/execute_ai_command", methods=["POST"])
 def execute_ai_command():
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "Não autorizado"}), 401
         
     data = request.json or {}
@@ -483,7 +476,7 @@ def screenshots(filename):
 
 @app.route("/device/<hostname>")
 def device_details(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
@@ -494,7 +487,7 @@ def device_details(hostname):
 
 @app.route("/monitor/<hostname>")
 def monitor(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
@@ -503,19 +496,19 @@ def monitor(hostname):
 
 @app.route("/terminal/<hostname>")
 def terminal(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     return render_template("terminal.html", hostname=hostname, user=session["user"], role=session["role"])
 
 @app.route("/viewer/<hostname>")
 def viewer(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     return render_template("viewer.html", hostname=hostname, user=session["user"], role=session["role"])
 
 @app.route("/api/terminal/<hostname>", methods=["POST"])
 def api_terminal(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "unauthorized"}), 401
     
     command = request.json.get("command", "").strip()
@@ -535,7 +528,7 @@ def api_terminal(hostname):
 
 @app.route("/remote/<hostname>")
 def remote(hostname):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
@@ -554,7 +547,7 @@ def remote(hostname):
 
 @app.route("/send_command/<hostname>/<command>")
 def send_command(hostname, command):
-    if "user" not in session:
+    if "username" not in session:
         return jsonify({"error": "unauthorized"}), 401
 
     terminal_results[hostname] = ""
@@ -574,7 +567,7 @@ def send_command(hostname, command):
 
 @app.route('/users')
 def lista_usuarios():
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     
     conn = connect_db()
@@ -595,7 +588,7 @@ def lista_usuarios():
 
 @app.route('/add_user', methods=['POST'])
 def add_user():
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
         
     username = request.form.get('username') or request.form.get('user')
@@ -627,7 +620,7 @@ def add_user():
 
 @app.route('/delete_user/<username>')
 def delete_user(username):
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
         
     if username == "admin":
@@ -643,19 +636,20 @@ def delete_user(username):
 
 @app.route("/notepad")
 def notepad():
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     return render_template("notepad.html", user=session["user"], role=session["role"])
 
 @app.route("/alerts")
 def alerts_page():
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
     return render_template("alerts.html", alerts=alerts, user=session["user"], role=session["role"])
 
 @app.route("/change_password", methods=["GET", "POST"])
+@app.route("/change_password", methods=["GET", "POST"])
 def change_password():
-    if "user" not in session:
+    if "username" not in session:
         return redirect(url_for("login"))
 
     if request.method == "POST":
@@ -665,7 +659,7 @@ def change_password():
 
         conn = connect_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=?", (session["user"],))
+        cursor.execute("SELECT * FROM users WHERE username=?", (session["username"],))
         user = cursor.fetchone()
 
         if not user or not check_password_hash(user[2], current_password):
@@ -673,15 +667,14 @@ def change_password():
         elif new_password != confirm_password:
             flash("As senhas não coincidem!")
         else:
-            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["user"]))
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["username"]))
             conn.commit()
             flash("Senha alterada com sucesso!")
             conn.close()
             return redirect(url_for("dashboard"))
         conn.close()
 
-    return render_template("change_password.html", user=session["user"], role=session["role"])
-
+    return render_template("change_password.html", user=session["username"], role=session["role"])
 # =========================================
 # CONFIGURAÇÃO DE E-MAIL (SMTP)
 # =========================================
