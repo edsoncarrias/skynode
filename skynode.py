@@ -12,16 +12,17 @@ from ping3 import ping
 
 app = Flask(__name__)
 
-# CONFIGURAÇÃO CRUCIAL: Chave secreta fixa para manter você logado na Render
+# Chave secreta fixa e robusta para garantir a persistência dos cookies de sessão
 app.secret_key = "CHAVE_MEGA_SEGURA_E_FIXA_DO_SKYNODE_2026"
 
+# Inicialização limpa do SocketIO integrada ao ciclo do Flask
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 DATABASE = "skynode.db"
 SCREENSHOT_FOLDER = "screenshots"
 os.makedirs(SCREENSHOT_FOLDER, exist_ok=True)
 
-# Variaveis globais de controle
+# Estruturas de dados globais (Voláteis em memória para os agentes ativos)
 devices = []
 alerts = []
 commands = {}
@@ -31,7 +32,6 @@ def connect_db():
     return sqlite3.connect(DATABASE)
 
 def create_database():
-    # O banco de dados NÃO é mais deletado automaticamente para não sumir com os dados na Render
     conn = connect_db()
     cursor = conn.cursor()
     
@@ -66,7 +66,7 @@ def create_database():
     )
     """)
     
-    # Garante que o usuário admin padrão exista com a senha correta
+    # Validação e inserção segura do administrador padrão
     cursor.execute("SELECT * FROM users WHERE username='admin'")
     if not cursor.fetchone():
         hashed_pw = generate_password_hash("admin123")
@@ -75,6 +75,7 @@ def create_database():
         
     conn.close()
 
+# Inicializa o banco de dados preservando os registros existentes
 create_database()
 
 def get_device_status(device):
@@ -113,7 +114,7 @@ def serialize_devices():
 # ==========================================
 
 @app.route('/', methods=['GET', 'POST'])
-@app.route('/login', methods=['GET', 'POST'])  # Correção: Aceita ambas as URLs para evitar 404
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -126,9 +127,10 @@ def login():
         conn.close()
 
         if row and check_password_hash(row[0], password):
-            session['username'] = username  # Padronizado para username
+            session.clear()  # Limpa resíduos de sessões anteriores para evitar conflitos de cookie
+            session['username'] = username
             session['role'] = row[1]
-            return redirect('/dashboard')
+            return redirect(url_for('dashboard'))
         else:
             flash("Usuário ou senha incorretos!")
             
@@ -138,7 +140,7 @@ def login():
 @app.route("/dashboard/")
 def dashboard():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
         
     try:
         lista_dispositivos = serialize_devices()
@@ -153,28 +155,28 @@ def dashboard():
 @app.route("/change_password/", methods=["GET", "POST"])
 def change_password():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
 
     if request.method == "POST":
-        current_password = request.form["current_password"]
-        new_password = request.form["new_password"]
-        confirm_password = request.form["confirm_password"]
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
 
         conn = connect_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=?", (session["username"],))
+        cursor.execute("SELECT password FROM users WHERE username=?", (session["username"],))
         user = cursor.fetchone()
 
-        if not user or not check_password_hash(user[2], current_password):
+        if not user or not check_password_hash(user[0], current_password):
             flash("Senha atual incorreta!")
         elif new_password != confirm_password:
             flash("As senhas não coincidem!")
         else:
             cursor.execute("UPDATE users SET password=? WHERE username=?", (generate_password_hash(new_password), session["username"]))
             conn.commit()
-            flash("Senha alterada com sucesso!")
             conn.close()
-            return redirect("/dashboard")
+            flash("Senha alterada com sucesso!")
+            return redirect(url_for('dashboard'))
         conn.close()
 
     return render_template("change_password.html", user=session["username"], role=session["role"])
@@ -183,7 +185,7 @@ def change_password():
 @app.route('/users/')
 def lista_usuarios():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     
     conn = connect_db()
     conn.row_factory = sqlite3.Row
@@ -204,16 +206,16 @@ def lista_usuarios():
 @app.route('/add_user', methods=['POST'])
 def add_user():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
         
     username = request.form.get('username') or request.form.get('user')
-    email = request.form.get('email')
+    email = request.form.get('email', '')
     password = request.form.get('password') or request.form.get('senha')
     role = request.form.get('role') or 'tecnico'
 
     if not username or not password:
         flash("Erro: Campos obrigatórios ausentes!")
-        return redirect('/users')
+        return redirect(url_for('lista_usuarios'))
 
     username = username.strip()
     hashed_password = generate_password_hash(password)
@@ -224,25 +226,27 @@ def add_user():
         cursor.execute("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)", (username, email, hashed_password, role))
         conn.commit()
     except Exception as e:
-        print(f"Erro ao inserir usuario: {e}")
+        print(f"❌ Erro ao inserir usuario: {e}")
+        flash("Erro ao cadastrar usuário. Certifique-se de que o nome é único.")
     finally:
         conn.close()
         
-    return redirect('/users')
+    return redirect(url_for('lista_usuarios'))
 
 @app.route('/delete_user/<username>')
 def delete_user(username):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
         
     if username == "admin":
-        return redirect('/users')
+        flash("O usuário administrador padrão não pode ser removido.")
+        return redirect(url_for('lista_usuarios'))
     try:
         with connect_db() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM users WHERE username=?", (username,))
             conn.commit()
-        return redirect('/users')
+        return redirect(url_for('lista_usuarios'))
     except Exception as e:
         return f"<h3>Erro ao excluir usuário:</h3><p>{e}</p><a href='/users'>Voltar</a>", 500
 
@@ -250,29 +254,28 @@ def delete_user(username):
 @app.route("/notepad/")
 def notepad():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     return render_template("notepad.html", user=session["username"], role=session["role"])
 
 @app.route("/alerts")
 @app.route("/alerts/")
 def alerts_page():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     return render_template("alerts.html", alerts=alerts, user=session["username"], role=session["role"])
 
 @app.route("/mapa")
 @app.route("/mapa/")
 def pagina_mapa():
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     return render_template("mapa_rede.html", user=session["username"], role=session["role"])
 
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect("/login")
+    return redirect(url_for('login'))
 
-# ROTA SECRETA DE EMERGÊNCIA (Se der 404, use para testar a vida do app)
 @app.route("/secret-reset-admin")
 def secret_reset_admin():
     conn = connect_db()
@@ -284,7 +287,7 @@ def secret_reset_admin():
     return "SUCESSO: Usuário 'admin' resetado para 'admin123'!"
 
 # ==========================================
-# ROTAS DE API E AGENTES
+# ROTAS DE API E MANIPULAÇÃO DE AGENTES
 # ==========================================
 
 @app.route("/api/devices")
@@ -342,7 +345,7 @@ def screenshots(filename):
 @app.route("/device/<hostname>")
 def device_details(hostname):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
@@ -353,7 +356,7 @@ def device_details(hostname):
 @app.route("/monitor/<hostname>")
 def monitor(hostname):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
         return "Dispositivo não encontrado", 404
@@ -362,13 +365,13 @@ def monitor(hostname):
 @app.route("/terminal/<hostname>")
 def terminal(hostname):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     return render_template("terminal.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/viewer/<hostname>")
 def viewer(hostname):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     return render_template("viewer.html", hostname=hostname, user=session["username"], role=session["role"])
 
 @app.route("/api/terminal/<hostname>", methods=["POST"])
@@ -394,7 +397,7 @@ def api_terminal(hostname):
 @app.route("/remote/<hostname>")
 def remote(hostname):
     if "username" not in session:
-        return redirect("/login")
+        return redirect(url_for('login'))
     
     selected_device = next((d for d in devices if d.get("hostname") == hostname), None)
     if not selected_device:
