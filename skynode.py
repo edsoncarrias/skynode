@@ -401,7 +401,7 @@ def login():
                 session['role'] = user[3]
                 
                 print(f"✅ Usuário {username} logado com sucesso!")
-                return redirect(url_for('dashboard')) # Mude para o nome da sua rota de destino (ex: 'index' ou 'dashboard')
+                return redirect('/dashboard') # Mude para o nome da sua rota de destino (ex: 'index' ou 'dashboard')
             else:
                 print("❌ Senha incorreta!")
                 flash("Usuário ou senha incorretos!")
