@@ -10,6 +10,7 @@ import platform
 import threading
 import requests
 import subprocess
+from werkzeug.security import generate_password_hash
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import smtplib
@@ -173,11 +174,21 @@ def connect_db():
     return conn
 
 def create_database():
+    db_file = "skynode.db" # Verifique se o nome do seu arquivo de banco é exatamente este
+    
+    # FORÇA BRUTA: Se o banco estiver corrompido ou travado, deleta o arquivo físico para recriar limpo
+    # (Remova estas duas linhas depois que conseguir logar pela primeira vez se não quiser perder dados nos próximos deploys)
+    if os.path.exists(db_file):
+        try:
+            os.remove(db_file)
+            print("-> Banco de dados antigo deletado para limpeza de cache de login.")
+        except Exception as e:
+            print(f"-> Erro ao deletar banco antigo: {e}")
+
     conn = connect_db()
     cursor = conn.cursor()
     
-    # 1. Cria a tabela de usuários se não existir
-
+    # 1. Cria a tabela de usuários limpa
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,16 +198,8 @@ def create_database():
             email TEXT
         )
     """)
-    conn.commit()
     
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT;")
-        conn.commit()
-    except Exception:
-        pass
-
-    # 2. Cria as outras tabelas do sistema
-
+    # 2. Cria as tabelas de métricas e dispositivos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS metrics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,20 +222,21 @@ def create_database():
     """)
     conn.commit()
     
-    # 3. FORÇA BRUTA: Remove o admin antigo (se houver) para evitar hash corrompido
-    cursor.execute("DELETE FROM users WHERE username=?", ("admin",))
-    conn.commit()
-    
-    # 4. Insere o admin do zero com a criptografia perfeita do Werkzeug
+    # 3. Gera o Hash da senha usando o método padrão e seguro atual
     admin_password = generate_password_hash("admin123")
-    cursor.execute("""
-        INSERT INTO users (username, password, role, email) 
-        VALUES (?, ?, ?, ?)
-    """, ("admin", admin_password, "admin", "admin@skynode.com"))
     
-    conn.commit()
+    # 4. Insere o Admin garantindo que ele seja o ID 1 do banco limpo
+    try:
+        cursor.execute("""
+            INSERT INTO users (username, password, role, email) 
+            VALUES (?, ?, ?, ?)
+        """, ("admin", admin_password, "admin", "admin@skynode.com"))
+        conn.commit()
+        print("✅ NOVO BANCO DE DADOS CRIADO! Admin padrão configurado: admin / admin123")
+    except Exception as e:
+        print(f"❌ Erro ao inserir admin: {e}")
+        
     conn.close()
-    print("✅ Banco de dados SQLite inicializado e ADMIN resetado com sucesso!")
 
     # =========================================
     #FIM DATA BASE
