@@ -3,8 +3,6 @@ Flask-SocketIO
 Flask-Login
 Flask-SQLAlchemy
 Werkzeug
-gunicorn
-gevent
-gevent-websocket
+eventlet
 requests
 ping3
