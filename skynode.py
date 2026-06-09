@@ -10,6 +10,7 @@ import platform
 import threading
 import requests
 import subprocess
+import email_service
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -855,6 +856,42 @@ def add_header(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT email FROM users WHERE username=?", (username,))
+        row = cursor.fetchone()
+        
+        if row and row[0]:
+            email_usuario = row[0]
+            
+            # Utiliza as funções do módulo externo de forma limpa
+            senha_provisoria = email_service.gerar_senha_provisoria()
+            senha_hash = generate_password_hash(senha_provisoria)
+            
+            # Atualiza o banco de dados local
+            cursor.execute("UPDATE users SET password=? WHERE username=?", (senha_hash, username))
+            conn.commit()
+            conn.close()
+            
+            # Dispara o e-mail delegando para o arquivo externo
+            email_service.disparar_recuperacao(email_usuario, senha_provisoria)
+            
+            flash("Se o usuário existir e possuir um e-mail cadastrado, uma nova senha foi enviada!")
+            return redirect(url_for('login'))
+        else:
+            conn.close()
+            flash("Usuário não encontrado ou sem e-mail associado.")
+            
+    return render_template('forgot_password.html')
+
+
+
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
