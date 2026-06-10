@@ -241,19 +241,36 @@
         }
 
         // SALVAR CONFIGURAÇÕES VIA API COMUNICAÇÃO
-        async function salvarConfiguracoes(event) {
-            event.preventDefault();
-            const formAtivo = event.target;
-            const btn = formAtivo.querySelector('.btn-salvar');
-            
-            btn.disabled = true;
-            btn.innerText = "⏳ Gravando...";
+async function salvarConfiguracoes(event) {
+    event.preventDefault();
+    const formAtivo = event.target;
+    const btn = formAtivo.querySelector('.btn-salvar');
+    
+    // Evita cliques duplos enquanto grava
+    btn.disabled = true;
+    btn.innerText = "⏳ Gravando...";
 
-            const formData = new FormData(formAtivo);
-            const payload = Object.fromEntries(formData.entries());
+    const formData = new FormData(formAtivo);
+    const payload = Object.fromEntries(formData.entries());
 
-            try {
-                const response = await fetch('/api/configuracoes/salvar', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify
+    try {
+        const response = await fetch('/api/configuracoes/salvar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload) // <-- O corte era aqui!
+        });
+
+        if (response.ok) {
+            alert("✅ Configurações salvas com sucesso!");
+        } else {
+            alert("❌ Erro ao salvar as configurações no servidor.");
+        }
+    } catch (error) {
+        console.error("Erro na requisição:", error);
+        alert("❌ Falha crítica de comunicação com o servidor.");
+    } finally {
+        // Restaura o botão para o estado original, dando certo ou errado
+        btn.disabled = false;
+        btn.innerText = "💾 Salvar Configurações";
+    }
+}
