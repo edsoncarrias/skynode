@@ -1,0 +1,48 @@
+/* =========================================================
+   ESTILO GLOBAL DE RESPONSIVIDADE - SKYNODE
+   ========================================================= */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        border-right: none;
+        border-bottom: 1px solid #1e293b;
+        padding: 15px;
+    }
+
+    .logo-container {
+        margin-bottom: 10px;
+    }
+
+    .logo-img {
+        width: 150px;
+    }
+
+    .menu {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .menu a {
+        flex: 1 1 140px;
+    }
+
+    .menu-item {
+        margin-bottom: 0;
+        justify-content: center;
+        padding: 10px;
+    }
+
+    .logout-btn {
+        margin-top: 15px;
+        width: 100%;
+    }
+
+    .content {
+        margin-left: 0;
+        padding: 15px;
+    }
+}
