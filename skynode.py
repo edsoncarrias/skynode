@@ -896,21 +896,34 @@ def recuperar_senha():
     if request.method == 'POST':
         email = request.form.get('email')
         
-        # Conecta ao seu banco de dados SQLite para checar se o e-mail existe
-        conn = sqlite3.connect('database.db') # Ajuste para o nome real do seu .db se for diferente
+        # 1. Conecta ao banco de dados SQLite
+        conn = sqlite3.connect('database.db') # Certifique-se de que o nome do arquivo .db está correto
         cursor = conn.cursor()
+        
+        # 2. Verifica se o usuário com esse e-mail existe
         cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
         user = cursor.fetchone()
-        conn.close()
         
         if user:
-            # 📨 Aqui você poderá chamar o seu email_service futuramente:
-            # email_service.send_reset_email(email)
-            flash('Se o e-mail estiver cadastrado, você receberá as instruções de recuperação.', 'success')
-        else:
-            # Por segurança, exibimos a mesma mensagem para não expor quais e-mails existem no sistema
-            flash('Se o e-mail estiver cadastrado, você receberá as instruções de recuperação.', 'success')
+            # 3. Usa o email_service para gerar a senha provisória de 8 dígitos
+            nova_senha_texto = email_service.gerar_senha_provisoria()
             
+            # 4. Criptografa a senha gerada (usando o generate_password_hash que você importou)
+            senha_criptografada = generate_password_hash(nova_senha_texto)
+            
+            # 5. Atualiza a senha do usuário no banco de dados
+            cursor.execute("UPDATE users SET password = ? WHERE email = ?", (senha_criptografada, email))
+            conn.commit()
+            
+            # 6. Dispara o e-mail real em segundo plano usando a thread do email_service
+            email_service.disparar_recuperacao(email, nova_senha_texto)
+            
+            flash('Se o e-mail estiver cadastrado, você receberá uma senha provisória em instantes.', 'success')
+        else:
+            # Mensagem idêntica por segurança para evitar mapeamento de e-mails existentes
+            flash('Se o e-mail estiver cadastrado, você receberá uma senha provisória em instantes.', 'success')
+            
+        conn.close()
         return redirect(url_for('login'))
         
     return render_template('recuperar_senha.html')
