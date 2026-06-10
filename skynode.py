@@ -894,18 +894,25 @@ def forgot_password():
 @app.route('/recuperar_senha', methods=['GET', 'POST'])
 def recuperar_senha():
     if request.method == 'POST':
-        mail = request.form.get('email')
+        email = request.form.get('email')
         
-        # 🔍 Passo 1: Buscar o email no banco de dados (Exemplo conceitual)
-        # usuario = db.usuarios.find_one({'email': email})
+        # Conecta ao seu banco de dados SQLite para checar se o e-mail existe
+        conn = sqlite3.connect('database.db') # Ajuste para o nome real do seu .db se for diferente
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+        user = cursor.fetchone()
+        conn.close()
         
-        # 📨 Passo 2: Se o usuário existir, gera um token e envia por e-mail
-        # (Aqui depois vamos configurar o servidor de e-mail SMTP)
+        if user:
+            # 📨 Aqui você poderá chamar o seu email_service futuramente:
+            # email_service.send_reset_email(email)
+            flash('Se o e-mail estiver cadastrado, você receberá as instruções de recuperação.', 'success')
+        else:
+            # Por segurança, exibimos a mesma mensagem para não expor quais e-mails existem no sistema
+            flash('Se o e-mail estiver cadastrado, você receberá as instruções de recuperação.', 'success')
+            
+        return redirect(url_for('login'))
         
-        # Por enquanto, exibe uma mensagem de sucesso na tela
-        return render_template('recuperar_senha_sucesso.html', email=email)
-        
-    # Quando o usuário apenas clica no link, abre o formulário de e-mail
     return render_template('recuperar_senha.html')
 
 if __name__ == "__main__":
