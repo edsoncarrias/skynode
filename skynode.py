@@ -891,7 +891,22 @@ def forgot_password():
     return render_template('forgot_password.html')
 
 
-
+    @app.route('/recuperar_senha', methods=['GET', 'POST'])
+    def recuperar_senha():
+        if request.method == 'POST':
+            email = request.form.get('email')
+        
+        # 🔍 Passo 1: Buscar o email no banco de dados (Exemplo conceitual)
+        # usuario = db.usuarios.find_one({'email': email})
+        
+        # 📨 Passo 2: Se o usuário existir, gera um token e envia por e-mail
+        # (Aqui depois vamos configurar o servidor de e-mail SMTP)
+        
+        # Por enquanto, exibe uma mensagem de sucesso na tela
+        return render_template('recuperar_senha_sucesso.html', email=email)
+        
+    # Quando o usuário apenas clica no link, abre o formulário de e-mail
+    return render_template('recuperar_senha.html')
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
