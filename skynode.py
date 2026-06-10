@@ -891,10 +891,10 @@ def forgot_password():
     return render_template('forgot_password.html')
 
 
-    @app.route('/recuperar_senha', methods=['GET', 'POST'])
-    def recuperar_senha():
-        if request.method == 'POST':
-            email = request.form.get('email')
+@app.route('/recuperar_senha', methods=['GET', 'POST'])
+def recuperar_senha():
+    if request.method == 'POST':
+        mail = request.form.get('email')
         
         # 🔍 Passo 1: Buscar o email no banco de dados (Exemplo conceitual)
         # usuario = db.usuarios.find_one({'email': email})
