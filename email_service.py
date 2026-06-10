@@ -9,8 +9,8 @@ from werkzeug.security import generate_password_hash
 # CONFIGURAÇÕES DE DISPARO DE E-MAIL (SMTP)
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USER = "seu_email@gmail.com"         # Seu e-mail de disparo
-SMTP_PASSWORD = "sua_senha_de_aplicativo"   # Sua senha de aplicativo
+SMTP_USER = "skynode.sistema@gmail.com"         # Seu e-mail de disparo
+SMTP_PASSWORD = "eisb haql soxt opll"   # Sua senha de aplicativo
 
 # Executor isolado para não pesar no Flask
 email_executor = ThreadPoolExecutor(max_workers=2)
